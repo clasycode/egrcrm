@@ -403,3 +403,47 @@ class UpgradePreservationTests(TransactionTestCase):
             self.assertEqual(Candidate.objects.get(day_id=day.pk).state,'done')
         finally:
             MigrationExecutor(connection).migrate(latest)
+
+@override_settings(SECURE_SSL_REDIRECT=False,SESSION_COOKIE_SECURE=False)
+class CollectionStartFeedbackTests(TestCase):
+    def setUp(self):
+        self.user=get_user_model().objects.create_user('start-owner',is_staff=True)
+        self.client.force_login(self.user)
+
+    @patch('django.utils.timezone.localdate',return_value=date(2026,11,5))
+    def test_today_rejected_with_top_level_error_and_no_false_queue(self,today):
+        from .models import CollectionJob
+        response=self.client.post('/imports/',{'action':'period','start':'2026-11-03','end':'2026-11-05'})
+        self.assertEqual(response.status_code,200)
+        text=response.content.decode()
+        self.assertIn('Сбор не запущен',text)
+        self.assertIn('04.11.2026',text)
+        self.assertLess(text.index('role="alert"'),text.index('id="collection-progress"'))
+        self.assertFalse(CollectionJob.objects.exists())
+        self.assertFalse(ImportDay.objects.exists())
+
+    @patch('django.utils.timezone.localdate',return_value=date(2026,11,5))
+    def test_completed_period_accepted_and_calendar_has_iso_values(self,today):
+        from .models import CollectionJob
+        initial=self.client.get('/imports/').content.decode()
+        self.assertIn('value="2026-11-04"',initial)
+        self.assertIn('max="2026-11-04"',initial)
+        response=self.client.post('/imports/',{'action':'period','start':'2026-11-03','end':'2026-11-04'},follow=True)
+        self.assertContains(response,'03.11.2026–04.11.2026 принят в очередь')
+        self.assertEqual(ImportDay.objects.count(),2)
+        self.assertEqual(CollectionJob.objects.filter(state='pending').count(),2)
+
+    def test_idle_queue_active_and_error_statuses_are_distinct(self):
+        from django.utils import timezone
+        from .models import CollectorSettings
+        from .jobs import enqueue_lookup
+        CollectorSettings.objects.create(pk=1,heartbeat=timezone.now())
+        data=self.client.get('/imports/progress/').json()
+        self.assertIn('ожидает задания',data['status'])
+        self.assertNotEqual(data['status'],'Сборщик работает')
+        job=enqueue_lookup('193787017')
+        self.assertIn('Задания в очереди',self.client.get('/imports/progress/').json()['status'])
+        job.state='running';job.current_unp=job.unp;job.save()
+        self.assertEqual(self.client.get('/imports/progress/').json()['status'],'Идёт сбор данных')
+        job.state='error';job.save()
+        self.assertIn('ошибках',self.client.get('/imports/progress/').json()['status'])

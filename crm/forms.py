@@ -6,14 +6,23 @@ class LookupForm(forms.Form):
     unp = forms.RegexField(r'^[0-9]{9}$', label='УНП', max_length=9, min_length=9, error_messages={'invalid':'Введите УНП: ровно 9 цифр.'}, widget=forms.TextInput(attrs={'placeholder':'193787017','inputmode':'numeric'}))
 
 class PeriodForm(forms.Form):
-    start = forms.DateField(label='С', widget=forms.DateInput(attrs={'type':'date'}))
-    end = forms.DateField(label='По', widget=forms.DateInput(attrs={'type':'date'}))
+    start = forms.DateField(label='С', widget=forms.DateInput(format='%Y-%m-%d',attrs={'type':'date'}))
+    end = forms.DateField(label='По', widget=forms.DateInput(format='%Y-%m-%d',attrs={'type':'date'}))
+    def __init__(self,*args,**kwargs):
+        from datetime import timedelta
+        super().__init__(*args,**kwargs)
+        latest=(timezone.localdate()-timedelta(days=1)).isoformat()
+        for field in ('start','end'):
+            self.fields[field].widget.attrs['max']=latest
     def clean(self):
         data = super().clean()
         start,end = data.get('start'),data.get('end')
         if start and end:
             if end < start: raise forms.ValidationError('Дата окончания раньше начала.')
-            if end >= timezone.localdate(): raise forms.ValidationError('Выберите завершённые дни: не позднее вчерашнего.')
+            if end >= timezone.localdate():
+                from datetime import timedelta
+                latest=(timezone.localdate()-timedelta(days=1)).strftime('%d.%m.%Y')
+                raise forms.ValidationError(f'Сбор не запущен: доступны только завершённые дни, по {latest} включительно (Europe/Minsk). Сегодняшний день ещё не завершён. Исправьте дату «По» и нажмите загрузку снова.')
             if (end-start).days >= 365: raise forms.ValidationError('Одна загрузка — максимум 365 дней.')
         return data
 

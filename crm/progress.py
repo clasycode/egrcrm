@@ -21,7 +21,7 @@ def collection_progress():
              'message':job.message} for job in CollectionJob.objects.filter(state='running').select_related('day')]
     config=CollectorSettings.objects.filter(pk=1).first()
     source=SourceControl.objects.filter(pk=1).first()
-    return {'candidates':Candidate.objects.values('unp').distinct().count(),
+    result = {'candidates':Candidate.objects.values('unp').distinct().count(),
             'processed':Candidate.objects.filter(state='done').values('unp').distinct().count(),
             'crm':admitted.count(),'without_contacts':Company.objects.filter(admitted_at__isnull=True).count(),
             'days_done':ImportDay.objects.filter(state='done').count(),'days_total':ImportDay.objects.count(),
@@ -30,3 +30,17 @@ def collection_progress():
             'online':bool(config and config.heartbeat and timezone.now()-config.heartbeat<timedelta(minutes=15)),
             'paused':bool(source and source.paused),'reason':source.reason if source else '',
             'active':active,'days':days,'as_of':timezone.localtime().strftime('%H:%M:%S')}
+
+    if result['paused']:
+        result['status'] = 'Источник на паузе: '+result['reason']
+    elif not result['online']:
+        result['status'] = 'Сборщик не отвечает — перезапустите start-windows.bat'
+    elif result['active']:
+        result['status'] = 'Идёт сбор данных'
+    elif result['pending_jobs']:
+        result['status'] = 'Задания в очереди — сборщик ожидает следующего запроса'
+    elif result['error_jobs']:
+        result['status'] = 'Сбор остановлен на ошибках. Проверьте задания и повторите после устранения причины.'
+    else:
+        result['status'] = 'Сборщик запущен и ожидает задания. Выберите период в разделе загрузки — активного сбора сейчас нет.'
+    return result

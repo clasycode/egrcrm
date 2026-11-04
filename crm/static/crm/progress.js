@@ -18,9 +18,7 @@
     root.querySelectorAll('[data-counter]').forEach(node => {
       node.textContent = data[node.dataset.counter];
     });
-    document.getElementById('progress-status').textContent = data.paused
-      ? `Источник на паузе: ${data.reason}`
-      : data.online ? 'Сборщик работает' : 'Сборщик не отвечает — проверьте окно запуска CRM';
+    document.getElementById('progress-status').textContent = data.status;
     document.getElementById('progress-active').textContent = data.active.length
       ? data.active.map(item => `Сейчас: ${item.day ? item.day + ' · ' : ''}${item.unp ? 'УНП ' + item.unp : 'получение списка регистраций'}`).join('; ')
       : 'Сейчас нет активного запроса. Проверьте очередь и состояние источника.';

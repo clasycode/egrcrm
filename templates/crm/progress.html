@@ -1,6 +1,6 @@
 <section class="panel" id="collection-progress" aria-label="Прогресс загрузки">
 <h2>Сбор сейчас</h2>
-<p id="progress-status">{% if progress.paused %}Источник на паузе: {{ progress.reason }}{% elif progress.online %}Сборщик работает{% else %}Сборщик не отвечает — проверьте окно запуска CRM{% endif %}</p>
+<p id="progress-status">{{ progress.status }}</p>
 <div class="progress-cards">
 <div><strong data-counter="candidates">{{ progress.candidates }}</strong><span>Уникальных УНП найдено</span></div>
 <div><strong data-counter="processed">{{ progress.processed }}</strong><span>УНП обработано по дневным выборкам</span></div>

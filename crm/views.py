@@ -117,6 +117,7 @@ def imports(request):
             if lookup.is_valid():
                 job = enqueue_lookup(lookup.cleaned_data['unp'])
                 return redirect(f'/jobs/{job.pk}/')
+            messages.error(request,'Проверка УНП не запущена. '+' '.join(str(error) for errors in lookup.errors.values() for error in errors))
         elif action == 'period':
             period = PeriodForm(request.POST)
             if period.is_valid():
@@ -124,8 +125,9 @@ def imports(request):
                 while day <= period.cleaned_data['end']:
                     enqueue_day(day)
                     day += timedelta(days=1)
-                messages.success(request,'Дни поставлены в очередь. Прогресс показан ниже; обновите страницу через несколько секунд.')
+                messages.success(request,f'Период {period.cleaned_data["start"]:%d.%m.%Y}–{period.cleaned_data["end"]:%d.%m.%Y} принят в очередь. Сборщик обработает новые и незавершённые задания; завершённые дни повторно не загружаются. Прогресс ниже обновляется автоматически.')
                 return redirect('/imports/')
+            messages.error(request,' '.join(str(error) for errors in period.errors.values() for error in errors))
         elif action == 'fill_activities':
             count=0
             for unp in Company.objects.filter(activity_checked_at__isnull=True).values_list('unp',flat=True).iterator():
@@ -143,6 +145,7 @@ def imports(request):
                 schedule.save()
                 messages.success(request,'Расписание сохранено. Оно выполняется только при работающем сборщике.')
                 return redirect('/imports/')
+            messages.error(request,'Расписание не сохранено. '+' '.join(str(error) for errors in schedule.errors.values() for error in errors))
         elif action in ('pause','resume'):
             source.paused = action == 'pause'
             if action == 'resume': source.reason = ''
