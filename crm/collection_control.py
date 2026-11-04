@@ -1,5 +1,5 @@
 from django.db import transaction
-from .models import SourceControl, CollectorSettings, CollectionJob, ImportDay, Candidate, CollectionReset
+from .models import SourceControl, CollectorSettings, CollectionJob, ImportDay, Candidate, CollectionReset,CollectionRun
 
 def reset_collection(actor):
     """Cancel outstanding work. Never delete source history or CRM/manual data."""
@@ -18,5 +18,6 @@ def reset_collection(actor):
         count=CollectionJob.objects.filter(state__in=['pending','running','error']).update(state='cancelled',current_unp='',message='Отменено при сбросе сбора')
         ImportDay.objects.exclude(state__in=['done','cancelled']).update(state='cancelled')
         Candidate.objects.exclude(state__in=['done','cancelled']).update(state='cancelled')
+        CollectionRun.objects.filter(finished_at__isnull=True).update(state='cancelled',finished_at=__import__('django.utils.timezone',fromlist=['now']).now())
         CollectionReset.objects.create(actor=actor,cancelled_jobs=count)
     return count

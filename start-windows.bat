@@ -20,19 +20,13 @@ if not exist .venv\Scripts\python.exe (
 )
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 if errorlevel 1 goto fail
-if not exist .local-key (
-  .venv\Scripts\python.exe -c "import secrets; from pathlib import Path; Path('.local-key').write_text(secrets.token_urlsafe(48), encoding='ascii')"
-  if errorlevel 1 goto fail
-)
-set /p DJANGO_SECRET_KEY=<.local-key
+if not defined CRM_DATA_DIR set "CRM_DATA_DIR=%LOCALAPPDATA%\RudyCortex\EGRCRM"
+.venv\Scripts\python.exe prepare_local.py
+if errorlevel 1 goto fail
+set /p DJANGO_SECRET_KEY=<"%CRM_DATA_DIR%\.local-key"
 set DEBUG=1
 set PYTHONUNBUFFERED=1
 set ALLOWED_HOSTS=localhost,127.0.0.1
-if exist dev.sqlite3 (
-  if not exist backups mkdir backups
-  .venv\Scripts\python.exe -c "import sqlite3, datetime; from pathlib import Path; src=sqlite3.connect('dev.sqlite3'); dst=sqlite3.connect(str(Path('backups') / ('crm-' + datetime.datetime.now().strftime('%%Y%%m%%d-%%H%%M%%S-%%f') + '.sqlite3'))); src.backup(dst); dst.close(); src.close()"
-  if errorlevel 1 goto fail
-)
 .venv\Scripts\python.exe manage.py migrate
 if errorlevel 1 goto fail
 .venv\Scripts\python.exe manage.py shell -c "from django.contrib.auth import get_user_model; import sys; sys.exit(0 if get_user_model().objects.filter(is_active=True,is_superuser=True).exists() else 1)"

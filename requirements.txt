@@ -5,3 +5,9 @@ psycopg-binary==3.2.13
 sqlparse==0.6.1
 typing_extensions==4.16.0
 tzdata==2026.2
+openpyxl==3.1.5
+phonenumberslite==9.0.19
+whitenoise==6.11.0
+gunicorn==23.0.0; sys_platform != 'win32'
+et_xmlfile==2.0.0
+packaging==26.3

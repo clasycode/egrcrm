@@ -1,0 +1,52 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: egrcrm
+      POSTGRES_USER: egrcrm
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run deploy/configure.py first}
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U egrcrm -d egrcrm"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  web:
+    build: .
+    env_file: .env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_DB: egrcrm
+      POSTGRES_USER: egrcrm
+      CRM_DATA_DIR: /data
+      DEBUG: "0"
+      TRUST_PROXY_HTTPS: "1"
+    volumes: ["crm-data:/data"]
+    ports: ["127.0.0.1:8000:8000"]
+    command: ["sh", "-c", "python manage.py migrate && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2 --timeout 120"]
+    depends_on:
+      db: {condition: service_healthy}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8000/login/', headers={'X-Forwarded-Proto':'https'}), timeout=5)"]
+      interval: 10s
+      timeout: 6s
+      retries: 20
+  worker:
+    build: .
+    env_file: .env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_DB: egrcrm
+      POSTGRES_USER: egrcrm
+      CRM_DATA_DIR: /data
+      DEBUG: "0"
+    volumes: ["crm-data:/data"]
+    command: ["python", "manage.py", "egr_worker"]
+    depends_on:
+      web: {condition: service_healthy}
+    restart: unless-stopped
+volumes:
+  postgres-data:
+  crm-data:

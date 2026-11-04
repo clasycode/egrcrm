@@ -9,6 +9,11 @@ from .models import Company,Contact,ImportDay,Candidate,Receipt,SourceControl
 from .importer import enrich,discover,local_date
 from .egr import Client,SourceError,SourcePaused
 
+def response_body(response):
+    if not hasattr(response,'_test_body'):
+        response._test_body=b''.join(response.streaming_content) if response.streaming else response.content
+    return response._test_body
+
 class Fake:
     def __init__(self,kind=1,phone='123',email='',history=None):
         self.kind,self.phone,self.email,self.history = kind,phone,email,history
@@ -66,9 +71,10 @@ class WorkflowTests(TestCase):
         self.assertEqual(self.client.get('/').status_code,200)
         self.assertEqual(self.client.get('/imports/').status_code,200)
     def test_worker_initializes_calendar_days(self):
-        with patch('crm.management.commands.collect_egr.discover',side_effect=SourceError('offline')):
-            from django.core.management import CommandError
-            with self.assertRaises(CommandError): call_command('collect_egr',initialize=True,limit=1)
+        with patch('crm.jobs.discover',side_effect=SourceError('offline')):
+            call_command('collect_egr',initialize=True,limit=1)
+        from .models import CollectionJob
+        self.assertEqual(CollectionJob.objects.filter(state='error').count(),1)
         self.assertEqual(ImportDay.objects.count(),365)
         self.assertFalse(SourceControl.objects.get(pk=1).locked_until)
 
@@ -124,8 +130,8 @@ class QueueAndUITests(TestCase):
         Candidate.objects.create(day=job.day,unp='193787017')
         response=self.client.get(f'/imports/{job.day_id}/export/')
         self.assertEqual(response.status_code,200)
-        self.assertIn("'193787017",response.content.decode('utf-8-sig'))
-        self.assertContains(self.client.get('/imports/'),'Готовые компании CSV')
+        self.assertIn("'193787017",response_body(response).decode('utf-8-sig'))
+        self.assertContains(self.client.get('/imports/?tab=progress'),'Готовые компании CSV')
     def test_future_and_reversed_period_rejected(self):
         from .models import CollectionJob
         for start,end in [('2099-01-01','2099-01-02'),('2026-01-02','2026-01-01')]:
@@ -197,7 +203,7 @@ class QueueAndUITests(TestCase):
         Company.objects.create(unp='193787017',kind=1,name='=HYPERLINK("bad")',admitted_at=timezone.now())
         Company.objects.create(unp='193787018',kind=2,name='ИП',admitted_at=timezone.now())
         response=self.client.get('/companies/export/?kind=1')
-        body=response.content.decode('utf-8-sig')
+        body=response_body(response).decode('utf-8-sig')
         self.assertIn("'=HYPERLINK",body)
         self.assertNotIn('193787018',body)
         self.assertContains(self.client.get('/?kind=2'),'ИП')
@@ -291,8 +297,8 @@ class ActivitiesAndProgressTests(TestCase):
         self.assertNotContains(response,'Первая')
         self.assertContains(self.client.get('/?oked=47'),'Вторая')
         response=self.client.get('/companies/export/?oked=62')
-        self.assertIn('62010',response.content.decode('utf-8-sig'))
-        self.assertNotIn('Вторая',response.content.decode('utf-8-sig'))
+        self.assertIn('62010',response_body(response).decode('utf-8-sig'))
+        self.assertNotIn('Вторая',response_body(response).decode('utf-8-sig'))
 
     def test_invalid_filter_does_not_export_all_companies(self):
         enrich(Fake(),'123')
@@ -338,7 +344,7 @@ class ActivitiesAndProgressTests(TestCase):
             self.assertEqual((progress['candidates'],progress['processed'],progress['crm']),(2,1,1))
             self.assertEqual((progress['days'][0]['total'],progress['days'][0]['completed'],progress['days'][0]['ready']),(2,1,1))
             before=list(CollectionJob.objects.values('state','message','current_unp'))
-            csv=self.client.get(f'/companies/export/?day={job.day_id}').content.decode('utf-8-sig')
+            csv=response_body(self.client.get(f'/companies/export/?day={job.day_id}')).decode('utf-8-sig')
             self.assertIn("'123",csv);self.assertNotIn("'456",csv)
             self.assertIn('62010',csv);self.assertIn('Компьютерное программирование',csv)
             self.assertEqual(before,list(CollectionJob.objects.values('state','message','current_unp')))
@@ -347,7 +353,7 @@ class ActivitiesAndProgressTests(TestCase):
         job.refresh_from_db();self.assertEqual(job.state,'done')
         progress=self.client.get('/imports/progress/').json()
         self.assertEqual((progress['processed'],progress['crm']),(2,2))
-        csv=self.client.get(f'/companies/export/?day={job.day_id}').content.decode('utf-8-sig')
+        csv=response_body(self.client.get(f'/companies/export/?day={job.day_id}')).decode('utf-8-sig')
         self.assertIn("'456",csv)
 
     def test_progress_deduplicates_unps_and_protects_access(self):
@@ -393,6 +399,7 @@ class UpgradePreservationTests(TransactionTestCase):
             day=DayBefore.objects.create(day=date(2026,11,3),discovered=True)
             CandidateBefore.objects.create(day=day,unp='193787017',state='done')
             job=JobBefore.objects.create(day=day,key='day:2026-11-03',kind='day',state='pending')
+            manual=JobBefore.objects.create(key='unp:193787017',kind='unp',unp='193787017',state='pending')
             executor=MigrationExecutor(connection);executor.migrate(latest)
             from .models import CollectionJob
             upgraded=Company.objects.get(pk=row.pk)
@@ -400,6 +407,7 @@ class UpgradePreservationTests(TransactionTestCase):
             self.assertEqual(upgraded.current_address,'Минск, д. 8')
             self.assertIsNone(upgraded.activity_checked_at)
             self.assertEqual(CollectionJob.objects.get(pk=job.pk).state,'pending')
+            self.assertEqual(CollectionJob.objects.get(pk=manual.pk).priority,0)
             self.assertEqual(Candidate.objects.get(day_id=day.pk).state,'done')
         finally:
             MigrationExecutor(connection).migrate(latest)
@@ -415,7 +423,7 @@ class CollectionStartFeedbackTests(TestCase):
         from .models import CollectionJob
         response=self.client.post('/imports/',{'action':'period','start':'2026-11-03','end':'2026-11-05'})
         self.assertEqual(response.status_code,200)
-        text=response.content.decode()
+        text=response_body(response).decode()
         self.assertIn('Сбор не запущен',text)
         self.assertIn('04.11.2026',text)
         self.assertLess(text.index('role="alert"'),text.index('id="collection-progress"'))

@@ -22,13 +22,14 @@
     document.getElementById('progress-active').textContent = data.active.length
       ? data.active.map(item => `Сейчас: ${item.day ? item.day + ' · ' : ''}${item.unp ? 'УНП ' + item.unp : 'получение списка регистраций'}`).join('; ')
       : 'Сейчас нет активного запроса. Проверьте очередь и состояние источника.';
+    document.getElementById('progress-speed').textContent=data.speed_text;
     const body = document.getElementById('day-progress-rows');
     if (body) {
       const fragment = document.createDocumentFragment();
       data.days.forEach(day => {
         const row = document.createElement('tr');
         cell(row, day.date);
-        cell(row, day.state === 'cancelled' ? 'Отменено' : !day.discovered ? 'Получение списка' : day.state === 'done' ? 'Завершено' : 'Обогащение');
+        cell(row, day.state === 'cancelled' ? 'Отменено' : day.state === 'partial' ? 'Завершён с ошибками' : day.state === 'error' ? 'Ошибка' : !day.discovered ? 'Получение списка' : day.state === 'done' ? 'Завершено' : 'Обогащение');
         cell(row, `${day.completed} / ${day.total}${day.discovered ? '' : ' (список ещё не получен)'}`);
         cell(row, `${day.ready}`);
         cell(row, `${day.errors}${day.error ? ' · ' + day.error : ''}`);
@@ -47,6 +48,14 @@
       const response = await fetch('/imports/progress/', {cache: 'no-store', headers: {'Accept': 'application/json'}});
       if (!response.ok || response.redirected) throw new Error('Session or server error');
       render(await response.json());
+      if (document.getElementById('job-table') && document.activeElement?.tagName !== 'BUTTON') {
+        const jobs=await fetch('/imports/jobs/',{cache:'no-store'});
+        if (jobs.ok && !jobs.redirected) {
+          const page=new DOMParser().parseFromString(await jobs.text(),'text/html');
+          const table=page.getElementById('job-table');
+          if (table) document.getElementById('job-table').replaceWith(table);
+        }
+      }
     } catch (_) {
       freshness.textContent = 'Не удалось обновить прогресс. Показаны предыдущие данные. Проверьте соединение и вход в CRM.';
     } finally {

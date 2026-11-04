@@ -1,62 +1,23 @@
-from datetime import timedelta, date
-from django.core.management.base import BaseCommand, CommandError
-from django.db import transaction
+from datetime import date,timedelta
+from django.core.management.base import BaseCommand,CommandError
 from django.utils import timezone
-from crm.models import ImportDay,SourceControl
-from crm.egr import Client,SourceError,SourcePaused,SourceCancelled
-from crm.importer import discover,enrich
-
+from crm.jobs import enqueue_lookup,enqueue_day,enqueue_period,run_one
 class Command(BaseCommand):
-    help = 'Bounded EGR worker; run repeatedly. No overlapping workers.'
+    help='Use the same durable queue as the web interface; process only the requested target.'
     def add_arguments(self,p):
-        p.add_argument('--initialize',action='store_true')
-        p.add_argument('--day',type=date.fromisoformat)
-        p.add_argument('--limit',type=int,default=10)
-        p.add_argument('--unp')
+        p.add_argument('--initialize',action='store_true');p.add_argument('--day',type=date.fromisoformat)
+        p.add_argument('--limit',type=int,default=10);p.add_argument('--unp')
     def handle(self,*args,**o):
         if not 1<=o['limit']<=100: raise CommandError('limit must be 1..100')
-        from crm.leases import acquire, release
-        token = acquire()
-        if not token: raise CommandError('Источник на паузе или сборщик уже запущен')
-        try:
-            client = Client(lease=token)
-            if o['unp']:
-                if not o['unp'].isdigit(): raise CommandError('УНП должен содержать цифры')
-                row = enrich(client,o['unp']); self.stdout.write(f'{row.unp}: admitted={bool(row.admitted_at)}'); return
-            today = timezone.localdate()
-            if o['initialize']:
-                for n in range(1,366): ImportDay.objects.get_or_create(day=today-timedelta(days=n))
-            if o['day']: ImportDay.objects.get_or_create(day=o['day'])
-            day = ImportDay.objects.exclude(state='done').order_by('day').first()
-            if not day: self.stdout.write('Нет ожидающих интервалов'); return
-            try:
-                if not day.discovered: discover(client,day)
-                for item in day.candidates.exclude(state='done').order_by('pk')[:o['limit']]:
-                    try:
-                        enrich(client,item.unp)
-                        with transaction.atomic():
-                            client.ensure_active(lock=True)
-                            item.state,item.error = 'done',''
-                            item.save()
-                    except SourceCancelled as exc: raise CommandError(str(exc)) from exc
-                    except SourceError as exc:
-                        from crm.leases import is_current
-                        with transaction.atomic():
-                            if not is_current(token,lock=True,allow_paused=True): raise CommandError('Сбор отменён') from exc
-                            item.state,item.error = 'error',str(exc);item.save()
-                        raise
-                with transaction.atomic():
-                    client.ensure_active(lock=True)
-                    day.state = 'pending' if day.candidates.exclude(state='done').exists() else 'done'
-                    day.error = ''; day.save()
-                self.stdout.write(f'{day.day}: {day.state}')
-            except SourceCancelled as exc: raise CommandError(str(exc)) from exc
-            except (SourceError,ValueError) as exc:
-                from crm.leases import is_current
-                with transaction.atomic():
-                    if not is_current(token,lock=True,allow_paused=True): raise CommandError('Сбор отменён') from exc
-                    day.state,day.error = 'error',str(exc);day.save()
-                raise CommandError(str(exc)) from exc
-        except SourceError as exc: raise CommandError(str(exc)) from exc
-        finally:
-            release(token)
+        target=None
+        if o['unp']:
+            if not o['unp'].isdigit(): raise CommandError('УНП должен содержать цифры')
+            target=enqueue_lookup(o['unp']).pk
+        elif o['day']:
+            if o['day']>=timezone.localdate(): raise CommandError('Выберите завершённый день')
+            target=enqueue_day(o['day']).pk
+        elif o['initialize']:
+            enqueue_period(timezone.localdate()-timedelta(days=365),timezone.localdate()-timedelta(days=1),title='Начальная загрузка')
+        for _ in range(o['limit']):
+            if not run_one(target=target): break
+        self.stdout.write('Порция обработана. Статус и ошибки — в разделе загрузки.')
