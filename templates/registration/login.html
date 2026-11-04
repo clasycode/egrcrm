@@ -1,0 +1,1 @@
+{% extends 'crm/base.html' %}{% block content %}<h1>Вход в закрытую CRM</h1><div class="panel"><form method="post">{% csrf_token %}{{ form.as_p }}<button>Войти</button></form><p class="muted">Доступ предоставляется владельцем. Публичной регистрации нет.</p></div>{% endblock %}
