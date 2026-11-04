@@ -27,3 +27,17 @@ class ScheduleForm(forms.ModelForm):
         value = self.cleaned_data['lookback']
         if not 1 <= value <= 30: raise forms.ValidationError('От 1 до 30 дней.')
         return value
+
+class ActivityFilterForm(forms.Form):
+    oked = forms.CharField(required=False,label='ОКЭД: код или группа',help_text='Например: 62010 или 62. Несколько через запятую: 62, 63.')
+    exclude_oked = forms.CharField(required=False,label='Исключить ОКЭД',help_text='Коды или группы через запятую.')
+    activity = forms.CharField(required=False,max_length=200,label='Название вида деятельности')
+    def codes(self,field):
+        import re
+        raw = self.cleaned_data.get(field,'')
+        values = [value.strip() for value in raw.split(',') if value.strip()]
+        if len(values)>30 or any(not re.fullmatch(r'[0-9]{1,5}',value) for value in values):
+            raise forms.ValidationError('Введите до 30 кодов из 1–5 цифр через запятую.')
+        return values
+    def clean_oked(self): return self.codes('oked')
+    def clean_exclude_oked(self): return self.codes('exclude_oked')

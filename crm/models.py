@@ -10,6 +10,7 @@ class Company(models.Model):
     admitted_at = models.DateTimeField(null=True, blank=True)
     viewed_at = models.DateTimeField(null=True, blank=True)
     source_data = models.JSONField(default=dict)
+    activity_checked_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=32, default='Новая', choices=[(x,x) for x in ['Новая','В работе','Переговоры','Клиент','Вернуться позже','Не подходит','Отказ']])
     owner = models.ForeignKey(settings.AUTH_USER_MODEL,null=True,blank=True,on_delete=models.SET_NULL)
     do_not_contact = models.BooleanField(default=False)
@@ -17,6 +18,15 @@ class Company(models.Model):
     class Meta:
         constraints = [models.UniqueConstraint(fields=['country','unp'],name='unique_country_unp')]
     def __str__(self): return f'{self.unp} — {self.name}'
+    @property
+    def current_address(self):
+        from .company_data import address_text
+        records = self.source_data.get('current_addresses',[])
+        return '; '.join(dict.fromkeys(text for record in records if isinstance(record,dict) and (text := address_text(record))))
+    @property
+    def current_activities(self):
+        return [activity for activity in self.activities.all() if activity.current]
+
 
 class Contact(models.Model):
     company = models.ForeignKey(Company,on_delete=models.CASCADE,related_name='contacts')
@@ -47,7 +57,7 @@ class ImportDay(models.Model):
 
 class Candidate(models.Model):
     day = models.ForeignKey(ImportDay,on_delete=models.CASCADE,related_name='candidates')
-    unp = models.CharField(max_length=32)
+    unp = models.CharField(max_length=32, db_index=True)
     state = models.CharField(max_length=16,default='pending')
     error = models.TextField(blank=True)
     class Meta:
@@ -70,6 +80,7 @@ class SourceControl(models.Model):
 class CollectionJob(models.Model):
     key = models.CharField(max_length=80, unique=True)
     kind = models.CharField(max_length=10)
+    current_unp = models.CharField(max_length=32, blank=True)
     unp = models.CharField(max_length=32, blank=True)
     day = models.ForeignKey(ImportDay, null=True, blank=True, on_delete=models.CASCADE)
     state = models.CharField(max_length=16, default='pending', choices=[('pending','В очереди'),('running','Выполняется'),('done','Завершено'),('error','Ошибка')])
@@ -84,3 +95,14 @@ class CollectorSettings(models.Model):
     lookback = models.PositiveSmallIntegerField(default=7)
     last_scheduled = models.DateField(null=True, blank=True)
     heartbeat = models.DateTimeField(null=True, blank=True)
+
+class Activity(models.Model):
+    company = models.ForeignKey(Company,on_delete=models.CASCADE,related_name='activities')
+    code = models.CharField(max_length=20,db_index=True)
+    name = models.CharField(max_length=1000,blank=True)
+    search_name = models.CharField(max_length=1000,blank=True,db_index=True)
+    current = models.BooleanField(default=True,db_index=True)
+    source_data = models.JSONField(default=dict)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['company','code','name'],name='unique_company_activity')]
+        ordering = ['code','name']

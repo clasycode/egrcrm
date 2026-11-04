@@ -46,7 +46,7 @@ def run_one():
         CollectionJob.objects.filter(state='running').update(state='pending',message='Продолжение после остановки сборщика')
         job = CollectionJob.objects.filter(state='pending').order_by('-kind','created_at','pk').first()
         if not job: return False
-        job.state = 'running'; job.save(update_fields=['state','updated_at'])
+        job.state = 'running'; job.current_unp = job.unp if job.kind == 'unp' else ''; job.save(update_fields=['state','current_unp','updated_at'])
         client = Client(lease=token)
         if job.kind == 'unp':
             company = enrich(client,job.unp)
@@ -59,6 +59,9 @@ def run_one():
             # Each invocation enriches one candidate; the UI stays responsive.
             item = day.candidates.exclude(state='done').order_by('pk').first()
             if item:
+                job.current_unp = item.unp
+                job.message = f'Получение сведений по УНП {item.unp}'
+                job.save(update_fields=['current_unp','message','updated_at'])
                 try:
                     enrich(client,item.unp)
                     item.state,item.error = 'done',''; item.save()
@@ -68,6 +71,7 @@ def run_one():
             day.state,day.error = ('pending' if remaining else 'done'),''; day.save()
             job.state = 'pending' if remaining else 'done'
             job.message = f'Обработано {day.candidates.filter(state="done").count()} из {day.candidates.count()} УНП'
+        job.current_unp = ''
         job.save()
         return True
     except (SourceError,ValueError) as exc:

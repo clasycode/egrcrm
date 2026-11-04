@@ -2,7 +2,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from django.db import transaction
 from django.utils import timezone
-from .models import Company, Contact, Candidate
+from .models import Company, Contact, Candidate, Activity
 from .egr import SourceError
 
 def local_date(value):
@@ -36,14 +36,29 @@ def enrich(client,unp):
     names = client.get('getJurNamesByRegNum' if kind==1 else 'getIPFIOByRegNum',unp)
     current = client.get('getAddressByRegNum',unp)
     history = client.get('getAllAddressByRegNum',unp)
-    for record in names+current+history:
+    activities = client.get('getVEDByRegNum',unp)
+    for record in names+current+history+activities:
         if str(record.get('ngrn'))!=unp: raise SourceError('Чужой УНП в ответе обогащения')
     name = next((r.get('vnaim') or r.get('vfn') or r.get('vfio') for r in names if r.get('vnaim') or r.get('vfn') or r.get('vfio')),'')
+    activity_values = []
+    for record in activities:
+        definition = record.get('nsi00114')
+        if not isinstance(definition,dict): raise SourceError('В ответе ОКЭД отсутствует справочник nsi00114')
+        raw_code = definition.get('vkvdn')
+        if not isinstance(raw_code,(str,int)) or isinstance(raw_code,bool) or not str(raw_code).strip():
+            raise SourceError('В ответе ОКЭД отсутствует код vkvdn')
+        activity_name = definition.get('vnvdnp') or ''
+        if not isinstance(activity_name,str): raise SourceError('Неожиданный формат названия деятельности')
+        activity_values.append((str(raw_code).strip(),activity_name,record))
     with transaction.atomic():
         company,_ = Company.objects.get_or_create(country='BY',unp=unp,defaults={'kind':kind})
         company.kind,company.name = kind,name
         company.registered_on = local_date(base.get('dfrom'))
-        company.source_data = {'base':base,'names':names,'current_addresses':current,'address_history':history}
+        company.source_data = {'base':base,'names':names,'current_addresses':current,'address_history':history,'activities':activities}
+        company.activities.update(current=False)
+        for code,activity_name,record in activity_values:
+            Activity.objects.update_or_create(company=company,code=code,name=activity_name,defaults={'current':True,'search_name':activity_name.casefold(),'source_data':record})
+        company.activity_checked_at = timezone.now()
         company.contacts.filter(source='ЕГР').update(current=False)
         # History first; current endpoint determines currentness, never cact.
         for records,is_current in [(history,False),(current,True)]:

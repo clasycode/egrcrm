@@ -8,7 +8,7 @@ allowed = user_passes_test(lambda u: u.is_active and u.is_staff)
 
 def company_query(request):
     from datetime import date
-    rows = Company.objects.filter(admitted_at__isnull=False).prefetch_related('contacts')
+    rows = Company.objects.filter(admitted_at__isnull=False).prefetch_related('contacts','activities')
     q = request.GET.get('q','').strip()
     if q: rows = rows.filter(Q(unp__icontains=q)|Q(name__icontains=q)|Q(contacts__raw__icontains=q)).distinct()
     if request.GET.get('new'): rows = rows.filter(viewed_at__isnull=True)
@@ -23,6 +23,26 @@ def company_query(request):
         filters={'contacts__kind':request.GET['contact']}
         if request.GET.get('current') == '1': filters['contacts__current']=True
         rows=rows.filter(**filters).distinct()
+    from .forms import ActivityFilterForm
+    from .models import Activity, Candidate
+    activity_form=ActivityFilterForm(request.GET)
+    if not activity_form.is_valid(): return rows.none()
+    data=activity_form.cleaned_data
+    matching=Activity.objects.filter(current=True)
+    if data['oked']:
+        codes=Q()
+        for code in data['oked']: codes |= Q(code__startswith=code)
+        matching=matching.filter(codes)
+    if data['activity']: matching=matching.filter(search_name__contains=data['activity'].strip().casefold())
+    if data['oked'] or data['activity']: rows=rows.filter(pk__in=matching.values('company_id'))
+    if data['exclude_oked']:
+        codes=Q()
+        for code in data['exclude_oked']: codes |= Q(code__startswith=code)
+        rows=rows.exclude(pk__in=Activity.objects.filter(codes,current=True).values('company_id'))
+    if request.GET.get('day'):
+        try: day_id=int(request.GET['day'])
+        except ValueError: return rows.none()
+        rows=rows.filter(unp__in=Candidate.objects.filter(day_id=day_id,state='done').values('unp'))
     return rows.order_by('-admitted_at','pk')
 
 @allowed
@@ -31,17 +51,22 @@ def companies(request):
     rows = Paginator(company_query(request),50).get_page(request.GET.get('page'))
     params=request.GET.copy()
     params.pop('page',None)
-    return render(request,'crm/list.html',{'rows':rows,'q':request.GET.get('q',''),'statuses':Company._meta.get_field('status').choices,'query':params.urlencode()})
+    from .forms import ActivityFilterForm
+    from .progress import collection_progress
+    return render(request,'crm/list.html',{'progress':collection_progress(),'activity_form':ActivityFilterForm(request.GET),'rows':rows,'q':request.GET.get('q',''),'statuses':Company._meta.get_field('status').choices,'query':params.urlencode()})
 
 @allowed
 def companies_export(request):
     import csv
     from django.http import HttpResponse
+    from .forms import ActivityFilterForm
+    if not ActivityFilterForm(request.GET).is_valid():
+        return HttpResponse('Некорректный фильтр ОКЭД. Вернитесь к списку компаний и исправьте его.',status=400,content_type='text/plain; charset=utf-8')
     response=HttpResponse(content_type='text/csv; charset=utf-8')
     response['Content-Disposition']='attachment; filename="companies.csv"'
     response.write('\ufeff')
     writer=csv.writer(response,delimiter=';')
-    writer.writerow(['УНП','Название','Регистрация','Текущие телефоны','Исторические телефоны','Email','Сайт','CRM-статус','Не связываться'])
+    writer.writerow(['УНП','Название','Регистрация','Текущие телефоны','Исторические телефоны','Email','Сайт','CRM-статус','Не связываться','ОКЭД (текущие)','Виды деятельности (текущие)','Текущий адрес'])
     def safe(value):
         text=str(value or '')
         if text.lstrip().startswith(('=','+','-','@')) or text.startswith(('\t','\r','\n')): return "'"+text
@@ -49,7 +74,7 @@ def companies_export(request):
     for row in company_query(request):
         contacts=list(row.contacts.all())
         def values(kind,current=None): return ', '.join(c.raw for c in contacts if c.kind==kind and (current is None or c.current==current))
-        writer.writerow(["'"+row.unp,safe(row.name),str(row.registered_on or ''),"'"+values('phone',True),"'"+values('phone',False),safe(values('email')),safe(values('site')),safe(row.status),'Да' if row.do_not_contact else 'Нет'])
+        writer.writerow(["'"+row.unp,safe(row.name),str(row.registered_on or ''),"'"+values('phone',True),"'"+values('phone',False),safe(values('email')),safe(values('site')),safe(row.status),'Да' if row.do_not_contact else 'Нет',"'"+', '.join(a.code for a in row.current_activities),safe('; '.join(a.name for a in row.current_activities)),safe(row.current_address)])
     return response
 
 @allowed
@@ -101,6 +126,13 @@ def imports(request):
                     day += timedelta(days=1)
                 messages.success(request,'Дни поставлены в очередь. Прогресс показан ниже; обновите страницу через несколько секунд.')
                 return redirect('/imports/')
+        elif action == 'fill_activities':
+            count=0
+            for unp in Company.objects.filter(activity_checked_at__isnull=True).values_list('unp',flat=True).iterator():
+                enqueue_lookup(unp)
+                count+=1
+            messages.success(request,f'В очередь обновления поставлено компаний: {count}. Существующие заметки и статусы сохраняются.')
+            return redirect('/imports/')
         elif action == 'initialize':
             for n in range(1,366): enqueue_day(timezone.localdate()-timedelta(days=n))
             messages.success(request,'В очередь добавлены последние 365 завершённых дней. Уже завершённые дни не загружаются повторно.')
@@ -126,7 +158,8 @@ def imports(request):
                 messages.success(request,'Задание поставлено на повтор. Если источник на паузе, сначала устраните причину и возобновите его.')
             return redirect('/imports/')
     online = config.heartbeat and timezone.now()-config.heartbeat < timedelta(minutes=15)
-    return render(request,'crm/imports.html',{'rows':ImportDay.objects.order_by('-day')[:100],'jobs':CollectionJob.objects.select_related('company','day').order_by('-updated_at')[:50],'lookup':lookup,'period':period,'schedule':schedule,'source':source,'online':online,'heartbeat':config.heartbeat})
+    from .progress import collection_progress
+    return render(request,'crm/imports.html',{'progress':collection_progress(),'jobs':CollectionJob.objects.select_related('company','day').order_by('-updated_at')[:50],'lookup':lookup,'period':period,'schedule':schedule,'source':source,'online':online,'heartbeat':config.heartbeat})
 
 @allowed
 def job_status(request,pk):
@@ -155,3 +188,11 @@ def statistics(request):
     from django.db.models import Count
     rows=Company.objects.filter(admitted_at__isnull=False)
     return render(request,'crm/statistics.html',{'total':rows.count(),'new':rows.filter(viewed_at__isnull=True).count(),'candidates':Candidate.objects.values('unp').distinct().count(),'without':Company.objects.filter(admitted_at__isnull=True).count(),'statuses':rows.values('status').annotate(total=Count('id')).order_by('status'),'phones':Contact.objects.filter(company__admitted_at__isnull=False,kind='phone').values('company_id').distinct().count(),'emails':Contact.objects.filter(company__admitted_at__isnull=False,kind='email').values('company_id').distinct().count()})
+
+@allowed
+def import_progress(request):
+    from django.http import JsonResponse
+    from .progress import collection_progress
+    response=JsonResponse(collection_progress())
+    response['Cache-Control']='no-store'
+    return response

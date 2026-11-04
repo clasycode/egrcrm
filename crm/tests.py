@@ -16,6 +16,7 @@ class Fake:
         if method=='getBaseInfoByRegNum': return [{'ngrn':123,'dfrom':'2026-11-02T21:00:00Z','nsi00211':{'nkvob':self.kind}}]
         if 'Names' in method or 'FIO' in method: return [{'ngrn':123,'vnaim':'Компания <script>'}]
         if method=='getAllAddressByRegNum': return self.history or []
+        if method=='getVEDByRegNum': return [{'ngrn':123,'nsi00114':{'vkvdn':'62010','vnvdnp':'Компьютерное программирование'}}]
         return [{'ngrn':123,'vtels':self.phone,'vemail':self.email}]
 
 @override_settings(SECURE_SSL_REDIRECT=False,SESSION_COOKIE_SECURE=False)
@@ -124,7 +125,7 @@ class QueueAndUITests(TestCase):
         response=self.client.get(f'/imports/{job.day_id}/export/')
         self.assertEqual(response.status_code,200)
         self.assertIn("'193787017",response.content.decode('utf-8-sig'))
-        self.assertContains(self.client.get('/imports/'),'Скачать CSV')
+        self.assertContains(self.client.get('/imports/'),'Готовые компании CSV')
     def test_future_and_reversed_period_rejected(self):
         from .models import CollectionJob
         for start,end in [('2099-01-01','2099-01-02'),('2026-01-02','2026-01-01')]:
@@ -241,3 +242,164 @@ class LeaseTests(TestCase):
         lookup.refresh_from_db();day.refresh_from_db()
         self.assertEqual(lookup.state,'done')
         self.assertEqual(day.state,'pending')
+
+@override_settings(SECURE_SSL_REDIRECT=False,SESSION_COOKIE_SECURE=False)
+class ActivitiesAndProgressTests(TestCase):
+    def setUp(self):
+        self.user=get_user_model().objects.create_user('activity-owner',is_staff=True)
+        self.client.force_login(self.user)
+
+    def test_enrichment_stores_current_activities_and_address(self):
+        class Source(Fake):
+            def get(self,method,*args):
+                if method=='getAddressByRegNum': return [{'ngrn':123,'vtels':'123','vregion':'Минская область','vnp':'Минск','vulitsa':'Ленина','vdom':'10','vkorp':'2','vpom':'3'}]
+                return super().get(method,*args)
+        row=enrich(Source(),'123')
+        self.assertEqual(row.activities.get(current=True).code,'62010')
+        self.assertEqual(row.activities.get().name,'Компьютерное программирование')
+        self.assertIn('Минск, Ленина, д. 10, корп. 2, пом. 3',row.current_address)
+        self.assertIsNotNone(row.activity_checked_at)
+        self.assertIn('activities',row.source_data)
+        self.assertContains(self.client.get(f'/companies/{row.pk}/'),'62010')
+        self.assertContains(self.client.get('/'),'Компьютерное программирование')
+
+    def test_activity_change_preserves_old_source_and_manual_data(self):
+        row=enrich(Fake(),'123')
+        row.notes='Ручная работа';row.status='Клиент';row.do_not_contact=True;row.save()
+        class Changed(Fake):
+            def get(self,method,*args):
+                if method=='getVEDByRegNum': return [{'ngrn':123,'nsi00114':{'vkvdn':'63110','vnvdnp':'Обработка данных'}}]
+                return super().get(method,*args)
+        enrich(Changed(),'123');row.refresh_from_db()
+        self.assertFalse(row.activities.get(code='62010').current)
+        self.assertTrue(row.activities.get(code='63110').current)
+        self.assertEqual((row.notes,row.status,row.do_not_contact),('Ручная работа','Клиент',True))
+        self.assertNotContains(self.client.get('/?oked=62'),'Компания &lt;script&gt;')
+        self.assertContains(self.client.get('/?oked=63'),'Компания &lt;script&gt;')
+
+    def test_multiple_activities_include_exclude_and_case_insensitive_name(self):
+        from .models import Activity
+        from django.utils import timezone
+        first=Company.objects.create(unp='1',kind=1,name='Первая',admitted_at=timezone.now())
+        second=Company.objects.create(unp='2',kind=1,name='Вторая',admitted_at=timezone.now())
+        for company,code,name in [(first,'62010','Программирование'),(first,'63110','Обработка данных'),(second,'47110','Торговля')]:
+            Activity.objects.create(company=company,code=code,name=name,search_name=name.casefold())
+        for query in ['oked=62','oked=62010','oked=62,63','activity=ПРОГРАММИРОВАНИЕ']:
+            response=self.client.get('/?'+query)
+            self.assertContains(response,'Первая');self.assertNotContains(response,'Вторая')
+        response=self.client.get('/?oked=62&exclude_oked=63')
+        self.assertNotContains(response,'Первая')
+        self.assertContains(self.client.get('/?oked=47'),'Вторая')
+        response=self.client.get('/companies/export/?oked=62')
+        self.assertIn('62010',response.content.decode('utf-8-sig'))
+        self.assertNotIn('Вторая',response.content.decode('utf-8-sig'))
+
+    def test_invalid_filter_does_not_export_all_companies(self):
+        enrich(Fake(),'123')
+        self.assertContains(self.client.get('/?oked=foo'),'Введите до 30 кодов')
+        self.assertEqual(self.client.get('/companies/export/?oked=foo').status_code,400)
+
+    def test_old_cards_can_be_refreshed_without_resetting_metadata(self):
+        from .models import CollectionJob
+        from django.utils import timezone
+        old=Company.objects.create(unp='193787017',kind=1,notes='Заметка',status='Клиент',source_data={'current_addresses':[{'vnp':'Минск','vdom':'7'}]})
+        self.assertEqual(old.current_address,'Минск, д. 7')
+        Company.objects.create(unp='193787018',kind=1,activity_checked_at=timezone.now())
+        self.client.post('/imports/',{'action':'fill_activities'})
+        self.assertEqual(CollectionJob.objects.count(),1)
+        self.assertEqual(CollectionJob.objects.get().unp,old.unp)
+        old.refresh_from_db();self.assertEqual((old.notes,old.status),('Заметка','Клиент'))
+
+    def test_activity_failure_does_not_overwrite_prior_success(self):
+        row=enrich(Fake(),'123')
+        class Failed(Fake):
+            def get(self,method,*args):
+                if method=='getVEDByRegNum': raise SourceError('503')
+                return super().get(method,*args)
+        with self.assertRaises(SourceError): enrich(Failed(),'123')
+        row.refresh_from_db()
+        self.assertEqual(row.activities.filter(current=True).get().code,'62010')
+        self.assertTrue(row.contacts.get().current)
+
+    def test_partial_export_and_live_progress_do_not_stop_collection(self):
+        from .jobs import enqueue_day,run_one
+        from .models import CollectionJob
+        job=enqueue_day(date(2026,11,3))
+        class TwoCompanies(Fake):
+            def get(self,method,*args):
+                if method=='getBaseInfoByPeriod':
+                    return [{'ngrn':unp,'dfrom':'2026-11-02T21:00:00Z','nsi00208':{'nkscrt':1},'nsi00211':{'nkvob':1}} for unp in [123,456]]
+                records=super().get(method,*args)
+                return [{**record,'ngrn':int(args[0])} for record in records]
+        with patch('crm.jobs.Client',return_value=TwoCompanies()):
+            run_one()
+            job.refresh_from_db();self.assertEqual(job.state,'pending')
+            progress=self.client.get('/imports/progress/').json()
+            self.assertEqual((progress['candidates'],progress['processed'],progress['crm']),(2,1,1))
+            self.assertEqual((progress['days'][0]['total'],progress['days'][0]['completed'],progress['days'][0]['ready']),(2,1,1))
+            before=list(CollectionJob.objects.values('state','message','current_unp'))
+            csv=self.client.get(f'/companies/export/?day={job.day_id}').content.decode('utf-8-sig')
+            self.assertIn("'123",csv);self.assertNotIn("'456",csv)
+            self.assertIn('62010',csv);self.assertIn('Компьютерное программирование',csv)
+            self.assertEqual(before,list(CollectionJob.objects.values('state','message','current_unp')))
+            self.assertFalse(SourceControl.objects.get(pk=1).paused)
+            run_one()
+        job.refresh_from_db();self.assertEqual(job.state,'done')
+        progress=self.client.get('/imports/progress/').json()
+        self.assertEqual((progress['processed'],progress['crm']),(2,2))
+        csv=self.client.get(f'/companies/export/?day={job.day_id}').content.decode('utf-8-sig')
+        self.assertIn("'456",csv)
+
+    def test_progress_deduplicates_unps_and_protects_access(self):
+        first=ImportDay.objects.create(day=date(2026,1,1))
+        second=ImportDay.objects.create(day=date(2026,1,2))
+        for day in [first,second]: Candidate.objects.create(day=day,unp='123',state='done')
+        data=self.client.get('/imports/progress/').json()
+        self.assertEqual((data['candidates'],data['processed']),(1,1))
+        self.client.logout()
+        self.assertEqual(self.client.get('/imports/progress/').status_code,302)
+        outsider=get_user_model().objects.create_user('progress-outsider')
+        self.client.force_login(outsider)
+        self.assertEqual(self.client.get('/imports/progress/').status_code,302)
+
+    def test_active_unp_is_visible_while_enrichment_runs(self):
+        from .jobs import enqueue_lookup,run_one
+        from .importer import enrich as original
+        enqueue_lookup('123')
+        def inspect(client,unp):
+            data=self.client.get('/imports/progress/').json()
+            self.assertEqual(data['active'][0]['unp'],'123')
+            return original(Fake(),unp)
+        with patch('crm.jobs.enrich',side_effect=inspect): run_one()
+        self.assertEqual(self.client.get('/imports/progress/').json()['active'],[])
+
+from django.test import TransactionTestCase
+
+class UpgradePreservationTests(TransactionTestCase):
+    def test_upgrade_keeps_existing_company_and_pending_collection(self):
+        from django.db import connection
+        from django.db.migrations.executor import MigrationExecutor
+        executor=MigrationExecutor(connection)
+        old=[('crm','0003_sourcecontrol_lease_owner')]
+        latest=[('crm','0005_alter_candidate_unp')]
+        executor.migrate(old)
+        try:
+            apps=executor.loader.project_state(old).apps
+            CompanyBefore=apps.get_model('crm','Company')
+            DayBefore=apps.get_model('crm','ImportDay')
+            CandidateBefore=apps.get_model('crm','Candidate')
+            JobBefore=apps.get_model('crm','CollectionJob')
+            row=CompanyBefore.objects.create(unp='193787017',kind=1,status='Клиент',notes='Сохранить',do_not_contact=True,source_data={'current_addresses':[{'vnp':'Минск','vdom':'8'}]})
+            day=DayBefore.objects.create(day=date(2026,11,3),discovered=True)
+            CandidateBefore.objects.create(day=day,unp='193787017',state='done')
+            job=JobBefore.objects.create(day=day,key='day:2026-11-03',kind='day',state='pending')
+            executor=MigrationExecutor(connection);executor.migrate(latest)
+            from .models import CollectionJob
+            upgraded=Company.objects.get(pk=row.pk)
+            self.assertEqual((upgraded.notes,upgraded.status,upgraded.do_not_contact),('Сохранить','Клиент',True))
+            self.assertEqual(upgraded.current_address,'Минск, д. 8')
+            self.assertIsNone(upgraded.activity_checked_at)
+            self.assertEqual(CollectionJob.objects.get(pk=job.pk).state,'pending')
+            self.assertEqual(Candidate.objects.get(day_id=day.pk).state,'done')
+        finally:
+            MigrationExecutor(connection).migrate(latest)
