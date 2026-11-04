@@ -15,14 +15,11 @@ class Command(BaseCommand):
         p.add_argument('--unp')
     def handle(self,*args,**o):
         if not 1<=o['limit']<=100: raise CommandError('limit must be 1..100')
-        SourceControl.objects.get_or_create(pk=1)
-        now = timezone.now()
-        # Atomic conditional update works on PostgreSQL and local SQLite.
-        from django.db.models import Q
-        locked = SourceControl.objects.filter(pk=1,paused=False).filter(Q(locked_until__isnull=True)|Q(locked_until__lt=now)).update(locked_until=now+timedelta(hours=3))
-        if not locked: raise CommandError('Источник на паузе или сборщик уже запущен')
+        from crm.leases import acquire, release
+        token = acquire()
+        if not token: raise CommandError('Источник на паузе или сборщик уже запущен')
         try:
-            client = Client()
+            client = Client(lease=token)
             if o['unp']:
                 if not o['unp'].isdigit(): raise CommandError('УНП должен содержать цифры')
                 row = enrich(client,o['unp']); self.stdout.write(f'{row.unp}: admitted={bool(row.admitted_at)}'); return
@@ -49,4 +46,4 @@ class Command(BaseCommand):
                 raise CommandError(str(exc)) from exc
         except SourceError as exc: raise CommandError(str(exc)) from exc
         finally:
-            SourceControl.objects.filter(pk=1).update(locked_until=None)
+            release(token)

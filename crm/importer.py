@@ -15,9 +15,9 @@ def discover(client,day):
     records = client.get('getBaseInfoByPeriod',date,date)
     ids = []
     for record in records:
-        if record.get('nsi00208',{}).get('nkscrt') != 1: continue
+        if (record.get('nsi00208') or {}).get('nkscrt') != 1: continue
         if local_date(record.get('dfrom')) != day.day: continue
-        if record.get('nsi00211',{}).get('nkvob') not in (1,2): continue
+        if (record.get('nsi00211') or {}).get('nkvob') not in (1,2): continue
         unp = str(record.get('ngrn',''))
         if not unp.isdigit(): raise SourceError('Недопустимый УНП в выборке')
         ids.append(unp)
@@ -28,9 +28,10 @@ def discover(client,day):
 
 def enrich(client,unp):
     base = client.get('getBaseInfoByRegNum',unp)
+    if not base: raise SourceError('ЕГР вернул пустой ответ: субъект по этому УНП не найден. Это не ошибка сети.')
     if len(base)!=1 or str(base[0].get('ngrn'))!=unp: raise SourceError('Базовая запись не соответствует УНП')
     base = base[0]
-    kind = base.get('nsi00211',{}).get('nkvob')
+    kind = (base.get('nsi00211') or {}).get('nkvob')
     if kind not in (1,2): raise SourceError('Неизвестный тип субъекта')
     names = client.get('getJurNamesByRegNum' if kind==1 else 'getIPFIOByRegNum',unp)
     current = client.get('getAddressByRegNum',unp)

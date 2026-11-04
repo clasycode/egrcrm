@@ -4,3 +4,4 @@ psycopg==3.2.13
 psycopg-binary==3.2.13
 sqlparse==0.6.1
 typing_extensions==4.16.0
+tzdata==2026.2

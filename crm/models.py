@@ -65,3 +65,22 @@ class SourceControl(models.Model):
     paused = models.BooleanField(default=False)
     reason = models.TextField(blank=True)
     locked_until = models.DateTimeField(null=True)
+    lease_owner = models.CharField(max_length=36, blank=True)
+
+class CollectionJob(models.Model):
+    key = models.CharField(max_length=80, unique=True)
+    kind = models.CharField(max_length=10)
+    unp = models.CharField(max_length=32, blank=True)
+    day = models.ForeignKey(ImportDay, null=True, blank=True, on_delete=models.CASCADE)
+    state = models.CharField(max_length=16, default='pending', choices=[('pending','В очереди'),('running','Выполняется'),('done','Завершено'),('error','Ошибка')])
+    message = models.TextField(blank=True)
+    company = models.ForeignKey(Company, null=True, blank=True, on_delete=models.SET_NULL)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+class CollectorSettings(models.Model):
+    enabled = models.BooleanField(default=False)
+    run_at = models.TimeField(default='09:00')
+    lookback = models.PositiveSmallIntegerField(default=7)
+    last_scheduled = models.DateField(null=True, blank=True)
+    heartbeat = models.DateTimeField(null=True, blank=True)
