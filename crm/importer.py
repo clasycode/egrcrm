@@ -10,6 +10,11 @@ def local_date(value):
     parsed = datetime.fromisoformat(value.replace('Z','+00:00'))
     return parsed.astimezone(ZoneInfo('Europe/Minsk')).date() if parsed.tzinfo else parsed.date()
 
+def ensure_active(client):
+    # A real client locks the source row until this short persistence transaction commits.
+    check=getattr(client,'ensure_active',None)
+    if check: check(lock=True)
+
 def discover(client,day):
     date = day.day.strftime('%d.%m.%Y')
     records = client.get('getBaseInfoByPeriod',date,date)
@@ -22,6 +27,7 @@ def discover(client,day):
         if not unp.isdigit(): raise SourceError('Недопустимый УНП в выборке')
         ids.append(unp)
     with transaction.atomic():
+        ensure_active(client)
         for unp in ids: Candidate.objects.get_or_create(day=day,unp=unp)
         day.discovered = True
         day.save(update_fields=['discovered','updated_at'])
@@ -51,6 +57,7 @@ def enrich(client,unp):
         if not isinstance(activity_name,str): raise SourceError('Неожиданный формат названия деятельности')
         activity_values.append((str(raw_code).strip(),activity_name,record))
     with transaction.atomic():
+        ensure_active(client)
         company,_ = Company.objects.get_or_create(country='BY',unp=unp,defaults={'kind':kind})
         company.kind,company.name = kind,name
         company.registered_on = local_date(base.get('dfrom'))

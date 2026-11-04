@@ -75,7 +75,8 @@ class SourceControl(models.Model):
     paused = models.BooleanField(default=False)
     reason = models.TextField(blank=True)
     locked_until = models.DateTimeField(null=True)
-    lease_owner = models.CharField(max_length=36, blank=True)
+    lease_owner = models.CharField(max_length=64, blank=True)
+    generation = models.PositiveIntegerField(default=0)
 
 class CollectionJob(models.Model):
     key = models.CharField(max_length=80, unique=True)
@@ -83,7 +84,7 @@ class CollectionJob(models.Model):
     current_unp = models.CharField(max_length=32, blank=True)
     unp = models.CharField(max_length=32, blank=True)
     day = models.ForeignKey(ImportDay, null=True, blank=True, on_delete=models.CASCADE)
-    state = models.CharField(max_length=16, default='pending', choices=[('pending','В очереди'),('running','Выполняется'),('done','Завершено'),('error','Ошибка')])
+    state = models.CharField(max_length=16, default='pending', choices=[('pending','В очереди'),('running','Выполняется'),('done','Завершено'),('error','Ошибка'),('cancelled','Отменено')])
     message = models.TextField(blank=True)
     company = models.ForeignKey(Company, null=True, blank=True, on_delete=models.SET_NULL)
     updated_at = models.DateTimeField(auto_now=True)
@@ -106,3 +107,8 @@ class Activity(models.Model):
     class Meta:
         constraints = [models.UniqueConstraint(fields=['company','code','name'],name='unique_company_activity')]
         ordering = ['code','name']
+
+class CollectionReset(models.Model):
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL,null=True,on_delete=models.SET_NULL)
+    created_at = models.DateTimeField(auto_now_add=True)
+    cancelled_jobs = models.PositiveIntegerField(default=0)

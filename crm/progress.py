@@ -27,6 +27,7 @@ def collection_progress():
             'days_done':ImportDay.objects.filter(state='done').count(),'days_total':ImportDay.objects.count(),
             'pending_jobs':CollectionJob.objects.filter(state__in=['pending','running']).count(),
             'error_jobs':CollectionJob.objects.filter(state='error').count(),
+            'cancelled_jobs':CollectionJob.objects.filter(state='cancelled').count(),
             'online':bool(config and config.heartbeat and timezone.now()-config.heartbeat<timedelta(minutes=15)),
             'paused':bool(source and source.paused),'reason':source.reason if source else '',
             'active':active,'days':days,'as_of':timezone.localtime().strftime('%H:%M:%S')}

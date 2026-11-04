@@ -3,7 +3,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 from crm.models import ImportDay,SourceControl
-from crm.egr import Client,SourceError,SourcePaused
+from crm.egr import Client,SourceError,SourcePaused,SourceCancelled
 from crm.importer import discover,enrich
 
 class Command(BaseCommand):
@@ -34,15 +34,28 @@ class Command(BaseCommand):
                 for item in day.candidates.exclude(state='done').order_by('pk')[:o['limit']]:
                     try:
                         enrich(client,item.unp)
-                        item.state,item.error = 'done',''
-                        item.save()
+                        with transaction.atomic():
+                            client.ensure_active(lock=True)
+                            item.state,item.error = 'done',''
+                            item.save()
+                    except SourceCancelled as exc: raise CommandError(str(exc)) from exc
                     except SourceError as exc:
-                        item.state,item.error = 'error',str(exc); item.save(); raise
-                day.state = 'pending' if day.candidates.exclude(state='done').exists() else 'done'
-                day.error = ''; day.save()
+                        from crm.leases import is_current
+                        with transaction.atomic():
+                            if not is_current(token,lock=True,allow_paused=True): raise CommandError('Сбор отменён') from exc
+                            item.state,item.error = 'error',str(exc);item.save()
+                        raise
+                with transaction.atomic():
+                    client.ensure_active(lock=True)
+                    day.state = 'pending' if day.candidates.exclude(state='done').exists() else 'done'
+                    day.error = ''; day.save()
                 self.stdout.write(f'{day.day}: {day.state}')
+            except SourceCancelled as exc: raise CommandError(str(exc)) from exc
             except (SourceError,ValueError) as exc:
-                day.state,day.error = 'error',str(exc); day.save()
+                from crm.leases import is_current
+                with transaction.atomic():
+                    if not is_current(token,lock=True,allow_paused=True): raise CommandError('Сбор отменён') from exc
+                    day.state,day.error = 'error',str(exc);day.save()
                 raise CommandError(str(exc)) from exc
         except SourceError as exc: raise CommandError(str(exc)) from exc
         finally:

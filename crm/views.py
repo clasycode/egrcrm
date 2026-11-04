@@ -162,7 +162,7 @@ def imports(request):
             return redirect('/imports/')
     online = config.heartbeat and timezone.now()-config.heartbeat < timedelta(minutes=15)
     from .progress import collection_progress
-    return render(request,'crm/imports.html',{'progress':collection_progress(),'jobs':CollectionJob.objects.select_related('company','day').order_by('-updated_at')[:50],'lookup':lookup,'period':period,'schedule':schedule,'source':source,'online':online,'heartbeat':config.heartbeat})
+    return render(request,'crm/imports.html',{'progress':collection_progress(),'jobs':CollectionJob.objects.select_related('company','day').order_by('-updated_at')[:50],'lookup':lookup,'period':period,'schedule':schedule,'source':source,'reset_paused':source.reason.startswith('Сбор сброшен'),'online':online,'heartbeat':config.heartbeat})
 
 @allowed
 def job_status(request,pk):
@@ -182,7 +182,7 @@ def day_export(request,pk):
     admitted = set(Company.objects.filter(admitted_at__isnull=False,unp__in=day.candidates.values('unp')).values_list('unp',flat=True))
     for item in day.candidates.order_by('unp'):
         # Prefix text fields with apostrophe; no spreadsheet formulas.
-        writer.writerow(["'"+item.unp,day.day.isoformat(),{'done':'Обработан','pending':'В очереди','error':'Ошибка'}.get(item.state,item.state),'Да' if item.unp in admitted else 'Нет'])
+        writer.writerow(["'"+item.unp,day.day.isoformat(),{'done':'Обработан','pending':'В очереди','error':'Ошибка','cancelled':'Отменено'}.get(item.state,item.state),'Да' if item.unp in admitted else 'Нет'])
     return response
 
 @allowed
@@ -199,3 +199,17 @@ def import_progress(request):
     response=JsonResponse(collection_progress())
     response['Cache-Control']='no-store'
     return response
+
+@allowed
+def reset_imports(request):
+    from django.contrib import messages
+    from .models import CollectionJob
+    if request.method == 'POST':
+        if request.POST.get('confirm') != 'reset':
+            messages.error(request,'Подтвердите сброс на странице ниже.')
+        else:
+            from .collection_control import reset_collection
+            count=reset_collection(request.user)
+            messages.success(request,f'Сбор сброшен. Отменено заданий: {count}. Компании и ручные правки сохранены. Расписание выключено, источник на паузе. Для нового сбора выберите период и возобновите источник.')
+            return redirect('/imports/')
+    return render(request,'crm/reset.html',{'pending':CollectionJob.objects.filter(state__in=['pending','running','error']).count(),'companies':Company.objects.count()})

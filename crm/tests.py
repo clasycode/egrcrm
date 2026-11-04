@@ -381,7 +381,7 @@ class UpgradePreservationTests(TransactionTestCase):
         from django.db.migrations.executor import MigrationExecutor
         executor=MigrationExecutor(connection)
         old=[('crm','0003_sourcecontrol_lease_owner')]
-        latest=[('crm','0005_alter_candidate_unp')]
+        latest=executor.loader.graph.leaf_nodes('crm')
         executor.migrate(old)
         try:
             apps=executor.loader.project_state(old).apps
@@ -447,3 +447,118 @@ class CollectionStartFeedbackTests(TestCase):
         self.assertEqual(self.client.get('/imports/progress/').json()['status'],'Идёт сбор данных')
         job.state='error';job.save()
         self.assertIn('ошибках',self.client.get('/imports/progress/').json()['status'])
+
+@override_settings(SECURE_SSL_REDIRECT=False,SESSION_COOKIE_SECURE=False)
+class ResetCollectionTests(TestCase):
+    def setUp(self):
+        self.user=get_user_model().objects.create_user('reset-owner',is_staff=True)
+        self.client.force_login(self.user)
+
+    def test_reset_cancels_queue_keeps_data_and_disables_schedule(self):
+        from .models import CollectionJob,CollectorSettings,CollectionReset
+        from .jobs import enqueue_day,enqueue_lookup
+        from .collection_control import reset_collection
+        row=enrich(Fake(),'123');row.notes='Мои заметки';row.status='Клиент';row.do_not_contact=True;row.save()
+        day=enqueue_day(date(2026,11,3));lookup=enqueue_lookup('193787017')
+        Candidate.objects.create(day=day.day,unp='123',state='done')
+        Candidate.objects.create(day=day.day,unp='456',state='pending')
+        CollectorSettings.objects.create(pk=1,enabled=True)
+        count=reset_collection(self.user)
+        self.assertEqual(count,2)
+        self.assertEqual(CollectionJob.objects.filter(state='cancelled').count(),2)
+        self.assertEqual(Candidate.objects.get(unp='123').state,'done')
+        self.assertEqual(Candidate.objects.get(unp='456').state,'cancelled')
+        row.refresh_from_db()
+        self.assertEqual((row.notes,row.status,row.do_not_contact),('Мои заметки','Клиент',True))
+        self.assertTrue(row.contacts.exists())
+        self.assertFalse(CollectorSettings.objects.get(pk=1).enabled)
+        self.assertTrue(SourceControl.objects.get(pk=1).paused)
+        self.assertEqual(CollectionReset.objects.get().actor,self.user)
+
+    @patch('crm.egr.time.sleep')
+    @patch('crm.egr.urlopen')
+    def test_reset_during_http_cannot_restore_job_or_commit_data(self,open_,sleep):
+        import json
+        from .jobs import enqueue_lookup,run_one
+        from .collection_control import reset_collection
+        job=enqueue_lookup('123')
+        response=open_.return_value.__enter__.return_value
+        response.status=200
+        def arrive(*args):
+            reset_collection(self.user)
+            return json.dumps([{'ngrn':123,'nsi00211':{'nkvob':1}}]).encode()
+        response.read.side_effect=arrive
+        self.assertFalse(run_one())
+        job.refresh_from_db();self.assertEqual(job.state,'cancelled')
+        self.assertFalse(Company.objects.exists())
+        self.assertIsNone(SourceControl.objects.get(pk=1).locked_until)
+        self.assertFalse(run_one())
+
+    def test_reset_after_company_commit_does_not_erase_it_or_resurrect_job(self):
+        from .jobs import enqueue_day,run_one
+        from .collection_control import reset_collection
+        job=enqueue_day(date(2026,11,3));job.day.discovered=True;job.day.save()
+        Candidate.objects.create(day=job.day,unp='123')
+        def completed(client,unp):
+            company=enrich(Fake(),unp)
+            reset_collection(self.user)
+            return company
+        with patch('crm.jobs.enrich',side_effect=completed): self.assertFalse(run_one())
+        job.refresh_from_db();self.assertEqual(job.state,'cancelled')
+        self.assertEqual(Candidate.objects.get().state,'cancelled')
+        self.assertEqual(Company.objects.count(),1)
+        self.assertEqual(job.day.candidates.filter(state='done').count(),0)
+
+    def test_explicit_new_period_requeues_only_cancelled_work(self):
+        from .jobs import enqueue_day,run_one
+        from .collection_control import reset_collection
+        job=enqueue_day(date(2026,11,3));job.day.discovered=True;job.day.save()
+        Candidate.objects.create(day=job.day,unp='456',state='done')
+        Candidate.objects.create(day=job.day,unp='123',state='pending')
+        reset_collection(self.user)
+        self.assertFalse(run_one())
+        enqueue_day(job.day.day)
+        job.refresh_from_db();self.assertEqual(job.state,'pending')
+        self.assertEqual(Candidate.objects.get(unp='456').state,'done')
+        self.assertEqual(Candidate.objects.get(unp='123').state,'pending')
+        self.client.post('/imports/',{'action':'resume'})
+        with patch('crm.jobs.Client',return_value=Fake()): self.assertTrue(run_one())
+        job.refresh_from_db();self.assertEqual(job.state,'done')
+
+    def test_reset_does_not_release_in_flight_lease_for_second_worker(self):
+        from .leases import acquire,is_current,release
+        from .collection_control import reset_collection
+        token=acquire()
+        reset_collection(self.user)
+        self.assertFalse(is_current(token))
+        self.client.post('/imports/',{'action':'resume'})
+        self.assertIsNone(acquire())
+        release(token)
+        self.assertTrue(acquire())
+
+    def test_preview_requires_confirmation_and_csrf_and_is_private(self):
+        from .jobs import enqueue_lookup
+        job=enqueue_lookup('193787017')
+        self.assertContains(self.client.get('/imports/reset/'),'Подтвердить сброс')
+        job.refresh_from_db();self.assertEqual(job.state,'pending')
+        self.client.post('/imports/reset/',{})
+        job.refresh_from_db();self.assertEqual(job.state,'pending')
+        from django.test import Client as TestClient
+        csrf_client=TestClient(enforce_csrf_checks=True);csrf_client.force_login(self.user)
+        self.assertEqual(csrf_client.post('/imports/reset/',{'confirm':'reset'}).status_code,403)
+        self.client.logout()
+        self.assertEqual(self.client.post('/imports/reset/',{'confirm':'reset'}).status_code,302)
+        outsider=get_user_model().objects.create_user('reset-outsider')
+        self.client.force_login(outsider)
+        self.assertEqual(self.client.post('/imports/reset/',{'confirm':'reset'}).status_code,302)
+        job.refresh_from_db();self.assertEqual(job.state,'pending')
+
+    def test_pause_preserves_pending_job_instead_of_error(self):
+        from .jobs import enqueue_lookup,run_one
+        job=enqueue_lookup('193787017')
+        def pause(client,unp):
+            SourceControl.objects.filter(pk=1).update(paused=True)
+            from .egr import SourceCancelled
+            raise SourceCancelled('Пауза')
+        with patch('crm.jobs.enrich',side_effect=pause): self.assertFalse(run_one())
+        job.refresh_from_db();self.assertEqual(job.state,'pending')

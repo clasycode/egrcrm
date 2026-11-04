@@ -8,20 +8,27 @@ from .models import Receipt, SourceControl
 BASE = 'https://egr.gov.by/api/v2/egr/'
 class SourceError(Exception): pass
 class SourcePaused(SourceError): pass
+class SourceCancelled(SourceError): pass
 
 class Client:
     def __init__(self,lease=None):
         self.last_request = 0
         self.lease = lease
+    def ensure_active(self,lock=False):
+        if self.lease:
+            from .leases import assert_current
+            assert_current(self.lease,lock=lock)
+        elif SourceControl.objects.filter(pk=1,paused=True).exists():
+            raise SourcePaused('Источник приостановлен')
     def get(self,method,*args):
-        if SourceControl.objects.filter(pk=1,paused=True).exists(): raise SourcePaused('Источник приостановлен')
+        self.ensure_active()
         url = BASE + method + '/' + '/'.join(str(x) for x in args)
         for attempt in range(3):
             time.sleep(max(0,1-(time.monotonic()-self.last_request)))
             self.last_request = time.monotonic()
             if self.lease:
                 from .leases import renew
-                if not renew(self.lease): raise SourceError('Блокировка сборщика истекла. Повторите задание.')
+                if not renew(self.lease): raise SourceCancelled('Сбор отменён, приостановлен или блокировка истекла')
             try:
                 with urlopen(Request(url,headers={'Accept':'application/json'}),timeout=30) as response:
                     status = response.status
@@ -29,13 +36,19 @@ class Client:
             except HTTPError as exc:
                 status,body = exc.code,exc.read(10_000_001)
             except (URLError,TimeoutError,OSError) as exc:
+                self.ensure_active()
                 if attempt < 2:
                     time.sleep(2**(attempt+1)); continue
                 raise SourceError(f'Не удалось подключиться к ЕГР ({type(exc).__name__}). Проверьте интернет, доступ к egr.gov.by и настройки сертификатов. Отсутствие данных не установлено.') from exc
+            self.ensure_active()
             text = body.decode('utf-8',errors='replace')
             Receipt.objects.create(url=url,status=status,body=text)
             if status in (401,403,429):
-                SourceControl.objects.update_or_create(pk=1,defaults={'paused':True,'reason':f'HTTP {status}: {url}'})
+                if self.lease:
+                    changed=SourceControl.objects.filter(pk=1,lease_owner=self.lease,generation=int(self.lease.split(':',1)[0])).update(paused=True,reason=f'HTTP {status}: {url}')
+                    if not changed: raise SourceCancelled('Ограничение относится к отменённому сбору')
+                else:
+                    SourceControl.objects.update_or_create(pk=1,defaults={'paused':True,'reason':f'HTTP {status}: {url}'})
                 raise SourcePaused(f'HTTP {status}; источник приостановлен')
             if status >= 500 and attempt < 2:
                 time.sleep(2**(attempt+1)); continue

@@ -28,7 +28,7 @@
       data.days.forEach(day => {
         const row = document.createElement('tr');
         cell(row, day.date);
-        cell(row, !day.discovered ? 'Получение списка' : day.state === 'done' ? 'Завершено' : 'Обогащение');
+        cell(row, day.state === 'cancelled' ? 'Отменено' : !day.discovered ? 'Получение списка' : day.state === 'done' ? 'Завершено' : 'Обогащение');
         cell(row, `${day.completed} / ${day.total}${day.discovered ? '' : ' (список ещё не получен)'}`);
         cell(row, `${day.ready}`);
         cell(row, `${day.errors}${day.error ? ' · ' + day.error : ''}`);
