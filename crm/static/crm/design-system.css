@@ -545,3 +545,56 @@ select:disabled{opacity:.6}
 @media(forced-colors:active){select:not([multiple]){appearance:auto;background-image:none}}
 @media(max-width:1000px){.workday-top{grid-template-columns:minmax(0,1fr)}.workday-company{align-items:flex-start;flex-direction:column}.workday-actions{justify-content:flex-start}}
 @media(max-width:700px){.review-card-summary{align-items:flex-start;flex-direction:column}.processing-totals{grid-template-columns:repeat(2,minmax(0,1fr))}.brand-wordmark{font-size:21px}.workday-company{padding:18px}.workday-actions .button{font-size:11px}}
+/* Tables: scan names first, then contact details, then the next action. */
+.table-scroll{background:var(--color-parchment);scrollbar-color:var(--color-stone) var(--color-bone)}
+th{font-size:11px;font-weight:500;line-height:1.5;color:#55564d;padding:13px 16px;background:var(--color-linen)}
+td{padding:16px;line-height:1.6;font-size:12px;border-bottom-color:#d8d7cf}
+tbody>tr:nth-child(even){background:#f2f2ed}
+tbody>tr:hover{background:#eceee7}
+tbody>tr:focus-within{background:#eef0e8}
+.company-table{min-width:1080px}
+.company-table th:first-child{width:44px}
+.company-table th:nth-child(2){width:30%}
+.company-table th:nth-child(3){width:21%}
+.company-table th:nth-child(4){width:16%}
+.company-table th:nth-child(5){width:15%}
+.company-table td+td,.company-table th+th{border-left:1px solid #e2e1d9}
+.company-table .row-selection{padding-left:14px;padding-right:10px;vertical-align:middle}
+.company-table .company-cell{gap:12px}
+.company-table .company-mark{width:32px;height:32px;font-size:11px;margin-top:2px}
+.company-summary{flex:1;min-width:0}
+.company-name-line{display:flex;align-items:flex-start;gap:8px}
+.company-table .company-name{flex:1;min-width:0;font-size:14px;font-weight:500;line-height:1.4;margin-top:0;color:var(--color-ink)}
+.company-name:hover{color:var(--color-ember-readable)}
+.company-table .row-copy-button{width:26px;min-width:26px;min-height:26px;padding:5px;margin-top:-3px;flex-shrink:0;color:var(--text-muted)}
+.row-copy-button .icon{width:15px;height:15px}
+.company-table .company-meta{margin-top:7px;gap:8px}
+.company-table .company-meta .mono{font-size:11px;letter-spacing:.02em;color:#57584f}
+.company-kind{font-size:9px;letter-spacing:.03em;border-left:1px solid var(--color-stone);padding-left:8px;color:var(--text-muted)}
+.company-dates{display:flex;gap:2px 10px;flex-wrap:wrap;font-size:10px;color:var(--text-muted);margin-top:6px;line-height:1.6}
+.company-dates>span{white-space:nowrap}
+.activity-code{display:inline-block;padding:1px 5px;background:var(--color-linen);border-radius:3px;font:400 11px/1.6 var(--font-mono);color:#51594e;margin-bottom:4px}
+.cell-primary{font-size:12px;font-weight:500;color:var(--color-ink)}
+.cell-description{font-size:12px;line-height:1.55;margin:0;color:#555950;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.cell-address{color:var(--text-muted);font-size:11px;margin-top:5px;-webkit-line-clamp:2}
+.cell-empty{font-size:11px;color:var(--text-muted)}
+.cell-more{display:block;width:fit-content;font-size:10px;color:var(--color-ember-readable);margin-top:5px}
+.company-table .contact-value--phone{font-size:12px;font-weight:500;letter-spacing:.005em;margin:1px 0 7px}
+.company-table .contact-value--phone>.icon{color:#646d60}
+.company-table .contact-value--email{font-size:11px;margin:6px 0 0;color:#585c54}
+.company-table .contact-quick-actions{margin:0 0 3px;gap:5px}
+.company-table .quick-action{min-width:28px;min-height:28px;padding:5px;background:transparent;border-color:#c9cbc1}
+.company-table .quick-action:hover{background:var(--color-linen);border-color:var(--color-ink)}
+.company-table .quick-action.is-visited{background:#ece6eb;border-color:#b8a5b5}
+.company-table .quick-action .icon{width:15px;height:15px}
+.company-table .messenger-edit{border-color:transparent;color:#7c8074}
+.company-table .owner-line{font-size:11px;line-height:1.5;margin-top:8px;align-items:flex-start}
+.company-table .owner-line>span{overflow-wrap:anywhere}
+.company-table .owner-line .icon{margin-top:2px;flex-shrink:0}
+.company-table .inline-status [data-status-badge]{min-height:27px}
+.company-table .status{font-size:10px}
+.company-table .is-selected td{background:#e5e9db}
+.table-reading-note{font-size:10px;color:var(--text-muted)}
+.form-card .helptext{display:block;color:var(--text-muted);font-size:11px;line-height:1.7;max-width:520px;margin-top:6px}
+.form-card select{max-width:100%}
+@media(max-width:700px){.table-reading-note{font-size:9px}.company-table .quick-action{min-width:32px;min-height:32px}}

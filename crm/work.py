@@ -110,15 +110,20 @@ def company_status(request,pk):
 @allowed
 def contact_check(request,pk):
     contact=get_object_or_404(Contact.objects.select_related('company'),pk=pk)
-    form=ContactCheckForm(request.POST or None,initial={'verification':contact.verification,'comment':contact.comment,'do_not_contact':contact.do_not_contact})
+    form=ContactCheckForm(request.POST or None,initial={'verification':contact.verification,'comment':contact.comment,'do_not_contact':contact.do_not_contact,'telegram_state':contact.telegram_state,'viber_state':contact.viber_state})
+    if contact.kind!='phone':
+        form.fields.pop('telegram_state');form.fields.pop('viber_state')
     if request.method=='POST' and form.is_valid():
         before=contact.do_not_contact
-        for field,value in form.cleaned_data.items(): setattr(contact,field,value)
-        contact.checked_by=request.user;contact.checked_at=timezone.now();contact.save(update_fields=['verification','comment','do_not_contact','checked_by','checked_at'])
-        ContactCheck.objects.create(contact=contact,actor=request.user,result=contact.verification,note=contact.comment)
-        log(contact.company,request.user,contact_check=f'{contact.raw}: {contact.verification}; запрет {before} → {contact.do_not_contact}; {contact.comment}')
+        for field,value in form.cleaned_data.items():
+            if field in ('telegram_state','viber_state') and not value: continue
+            setattr(contact,field,value)
+        contact.checked_by=request.user;contact.checked_at=timezone.now();contact.save(update_fields=['verification','comment','do_not_contact','checked_by','checked_at','telegram_state','viber_state'])
+        messengers=f'Telegram: {contact.get_telegram_state_display()}; Viber: {contact.get_viber_state_display()}' if contact.kind=='phone' else ''
+        ContactCheck.objects.create(contact=contact,actor=request.user,result=contact.verification,note=f'{contact.comment}\n{messengers}'.strip())
+        log(contact.company,request.user,contact_check=f'{contact.raw}: {contact.verification}; запрет {before} → {contact.do_not_contact}; {contact.comment}; {messengers}')
         return redirect(f'/companies/{contact.company_id}/')
-    return render(request,'crm/form.html',{'title':f'Проверка контакта {contact.raw}','form':form})
+    return render(request,'crm/form.html',{'title':f'Проверка контакта {contact.raw}','form':form,'back_url':f'/companies/{contact.company_id}/','description':'Наличие аккаунта отмечается вручную. Автоматическая проверка по номеру недостоверна: на результат влияют приватность и ограничения мессенджеров.' if contact.kind=='phone' else 'Укажите результат ручной проверки контакта и ограничения обращений.'})
 
 @allowed
 def tasks(request):
@@ -314,7 +319,9 @@ def edit_manual_contact(request,pk):
         else:
             value=form.save(commit=False)
             value.normalized=normalized_contact(value.kind,value.raw);value.original_line=value.raw
-            value.save(update_fields=['raw','kind','comment','normalized','original_line'])
+            if value.raw!=before['raw'] or value.kind!=before['kind']:
+                value.telegram_state='unknown';value.viber_state='unknown'
+            value.save(update_fields=['raw','kind','comment','normalized','original_line','telegram_state','viber_state'])
             log(contact.company,request.user,manual_contact={'before':before,'after':form.cleaned_data})
             return redirect(f'/companies/{contact.company_id}/')
     return render(request,'crm/form.html',{'title':'Изменить ручной контакт','form':form})

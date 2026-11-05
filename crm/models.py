@@ -49,6 +49,9 @@ class Company(models.Model):
 
 
 class Contact(models.Model):
+    MESSENGER_STATES=[('unknown','Не проверено'),('present','Найден вручную'),('absent','Не найден при ручной проверке')]
+    telegram_state = models.CharField(max_length=10,choices=MESSENGER_STATES,default='unknown')
+    viber_state = models.CharField(max_length=10,choices=MESSENGER_STATES,default='unknown')
     company = models.ForeignKey(Company,on_delete=models.CASCADE,related_name='contacts')
     kind = models.CharField(max_length=10,choices=[('phone','Телефон'),('email','Email'),('site','Сайт')])
     raw = models.TextField()

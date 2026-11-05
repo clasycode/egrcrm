@@ -1,6 +1,6 @@
 from datetime import timedelta
 from django.shortcuts import render,redirect,get_object_or_404
-from django.http import JsonResponse,HttpResponseNotAllowed
+from django.http import HttpResponse,HttpResponseNotAllowed
 from django.contrib import messages
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -56,6 +56,6 @@ def copy_company(request,pk):
     if request.method!='GET':return HttpResponseNotAllowed(['GET'])
     from .company_copy import company_brief
     row=get_object_or_404(Company.objects.select_related('owner').prefetch_related('contacts','activities'),pk=pk)
-    response=JsonResponse({'text':company_brief(row)})
+    response=HttpResponse(company_brief(row),content_type='text/plain; charset=utf-8')
     response['Cache-Control']='no-store'
     return response

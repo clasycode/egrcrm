@@ -874,8 +874,8 @@ class DailyWorkTests(TestCase):
         before=Audit.objects.count()
         response=self.client.get(f'/companies/{self.row.pk}/copy/')
         self.assertEqual(response.status_code,200)
-        text=response.json()['text']
-        for value in (self.row.name,self.row.unp,'Важная заметка','+375298893777','Следующая задача','Реальный итог звонка','Есть дальнейший план','Не связываться: ДА','СВЕДЕНИЯ ИСТОЧНИКА ЕГР'):
+        text=response.content.decode()
+        for value in (self.row.name,self.row.unp,'Важная заметка','+375298893777','Следующая задача','Реальный итог звонка','Есть дальнейший план','Не связываться: ДА'):
             self.assertIn(value,text)
         self.assertEqual(response['Cache-Control'],'no-store')
         self.assertEqual(Audit.objects.count(),before)
@@ -893,6 +893,7 @@ class DailyWorkTests(TestCase):
         from django.utils import timezone
         from .models import WorkPreference,WorkDay,CompanyReview
         from .backups import create_archive,restore_archive
+        Contact.objects.filter(company=self.row).update(telegram_state='absent',viber_state='present')
         WorkPreference.objects.create(user=self.user,daily_target=20)
         WorkDay.objects.create(user=self.user,day=timezone.localdate(),target=20)
         CompanyReview.objects.create(company=self.row,user=self.user,result='ready',note='Сохранить в копии')
@@ -902,14 +903,80 @@ class DailyWorkTests(TestCase):
             restore_archive(archive,self.user,replace=True)
             self.assertEqual(WorkPreference.objects.get(user=self.user).daily_target,20)
             self.assertEqual(CompanyReview.objects.get().note,'Сохранить в копии')
+            self.assertEqual(Contact.objects.get().telegram_state,'absent')
+            self.assertEqual(Contact.objects.get().viber_state,'present')
             with zipfile.ZipFile(archive) as z:
                 manifest=json.loads(z.read('manifest.json'));data=json.loads(z.read('data.json'))
+            for record in data:
+                if record['model']=='crm.contact':
+                    record['fields'].pop('telegram_state',None);record['fields'].pop('viber_state',None)
             old=json.dumps([r for r in data if r['model'] not in ('crm.workpreference','crm.workday','crm.companyreview')],ensure_ascii=False).encode()
             manifest['sha256']=hashlib.sha256(old).hexdigest()
-            manifest['migrations']=[m for m in manifest['migrations'] if not m.startswith('0015_')]
+            manifest['migrations']=[m for m in manifest['migrations'] if not m.startswith(('0015_','0016_'))]
             legacy=Path(tmp)/'legacy.zip'
             with zipfile.ZipFile(legacy,'w') as z:z.writestr('manifest.json',json.dumps(manifest));z.writestr('data.json',old)
             restore_archive(legacy,self.user,replace=True)
             self.assertEqual(Company.objects.get().notes,'Важная заметка')
             self.assertEqual(CompanyReview.objects.count(),0)
             self.assertEqual(WorkPreference.objects.count(),0)
+            self.assertEqual(Contact.objects.get().telegram_state,'unknown')
+            self.assertEqual(Contact.objects.get().viber_state,'unknown')
+
+@override_settings(SECURE_SSL_REDIRECT=False,SESSION_COOKIE_SECURE=False)
+class ReadableTablesAndMessengerTests(TestCase):
+    def setUp(self):
+        from django.utils import timezone
+        self.user=get_user_model().objects.create_superuser('readability-owner','owner@example.test','test-password')
+        self.client.force_login(self.user)
+        self.row=Company.objects.create(unp='900000555',kind=1,name='Общество с ограниченной ответственностью "ЛавХаус"',admitted_at=timezone.now(),source_data={'raw_marker':'SHOULD_NOT_BE_COPIED'},notes='Обычная заметка')
+        self.phone=Contact.objects.create(company=self.row,kind='phone',raw='+375336454857',current=True,source='Вручную')
+
+    def test_plain_text_copy_has_no_source_json_and_human_audit(self):
+        from .models import Audit,SourceSnapshot
+        Audit.objects.create(company=self.row,actor=self.user,changes={'status':{'before':'Новая','after':'Клиент'},'do_not_contact':{'before':False,'after':True}})
+        SourceSnapshot.objects.create(company=self.row,fingerprint='a'*64,data={'snapshot_marker':'DO_NOT_COPY'})
+        response=self.client.get(f'/companies/{self.row.pk}/copy/')
+        self.assertEqual(response['Content-Type'],'text/plain; charset=utf-8')
+        text=response.content.decode()
+        for expected in ('КАРТОЧКА КОМПАНИИ',self.row.name,'КОНТАКТЫ','ВИДЫ ДЕЯТЕЛЬНОСТИ / ОКЭД','ИСТОРИЯ ИЗМЕНЕНИЙ CRM','Статус: Новая → Клиент','Запрет обращения: Нет → Да'):
+            self.assertIn(expected,text)
+        for unwanted in ('SHOULD_NOT_BE_COPIED','DO_NOT_COPY','СВЕДЕНИЯ ИСТОЧНИКА','ИСТОРИЯ СНИМКОВ','"before":','"after":'):
+            self.assertNotIn(unwanted,text)
+
+    def test_short_display_keeps_original_name_for_card_copy_and_tooltips(self):
+        from .templatetags.ui import company_short_name,company_identity
+        self.assertEqual(company_short_name(self.row.name),'ЛавХаус')
+        self.assertEqual(company_short_name('ООО «Клён & Ко»'),'Клён & Ко')
+        self.assertEqual(company_short_name('RudyCortex'),'RudyCortex')
+        self.assertEqual(company_short_name('ООО'),'ООО')
+        self.assertEqual(company_identity(self.row)['initials'],'Л')
+        response=self.client.get('/')
+        self.assertContains(response,'ЛавХаус')
+        self.assertContains(response,'row-copy-button')
+        self.assertContains(response,'scope="col"')
+        self.row.refresh_from_db();self.assertEqual(self.row.name,'Общество с ограниченной ответственностью "ЛавХаус"')
+
+    def test_only_manual_absence_hides_that_channel_and_can_be_reversed(self):
+        telegram='https://t.me/+375336454857';viber='viber://chat?number=%2B375336454857'
+        for path in ('/',f'/companies/{self.row.pk}/','/companies/fragment/'):
+            self.assertContains(self.client.get(path),telegram)
+            self.assertContains(self.client.get(path),viber)
+        url=f'/contacts/{self.phone.pk}/check/'
+        response=self.client.post(url,{'verification':'Не проверен','comment':'Проверил вручную','telegram_state':'absent','viber_state':'present'})
+        self.assertEqual(response.status_code,302)
+        for path in ('/',f'/companies/{self.row.pk}/','/companies/fragment/'):
+            self.assertNotContains(self.client.get(path),telegram)
+            self.assertContains(self.client.get(path),viber)
+        self.client.post(url,{'verification':'Не проверен','telegram_state':'unknown','viber_state':'absent'})
+        self.assertContains(self.client.get('/'),telegram)
+        self.assertNotContains(self.client.get('/'),viber)
+        self.phone.refresh_from_db();self.assertEqual(self.phone.checked_by,self.user)
+
+    def test_omitted_fields_keep_existing_marks_and_changed_number_resets_them(self):
+        self.phone.telegram_state='absent';self.phone.viber_state='present';self.phone.save()
+        self.client.post(f'/contacts/{self.phone.pk}/check/',{'verification':'ЛПР','comment':'Обычная проверка'})
+        self.phone.refresh_from_db();self.assertEqual(self.phone.telegram_state,'absent')
+        self.assertEqual(self.phone.viber_state,'present')
+        self.client.post(f'/contacts/{self.phone.pk}/edit/',{'kind':'phone','raw':'+375298893777','comment':'Новый номер'})
+        self.phone.refresh_from_db();self.assertEqual(self.phone.telegram_state,'unknown')
+        self.assertEqual(self.phone.viber_state,'unknown')

@@ -17,13 +17,13 @@
     if (button&&!button.disabled) {
       button.disabled=true;button.setAttribute('aria-busy','true');
       try {
-        const response=await fetch('/companies/'+button.dataset.copyCompany+'/copy/',{headers:{Accept:'application/json'},cache:'no-store'});
+        const response=await fetch('/companies/'+button.dataset.copyCompany+'/copy/',{headers:{Accept:'text/plain'},cache:'no-store'});
         if (!response.ok||response.redirected)throw new Error('Не удалось получить карточку. Обновите страницу и проверьте вход.');
-        const data=await response.json();
-        if (await write(data.text))toast('Полная карточка скопирована');
+        const content=await response.text();
+        if (await write(content))toast('Полная карточка скопирована');
         else {
           const dialog=document.getElementById('company-copy-dialog');
-          const text=document.getElementById('company-copy-text');text.value=data.text;
+          const text=document.getElementById('company-copy-text');text.value=content;
           if(!dialog.open)dialog.showModal();text.focus();text.select();
           dialog.addEventListener('close',()=>button.focus(),{once:true});
         }

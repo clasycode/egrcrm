@@ -57,7 +57,7 @@ def stage_badge(status):
 
 @register.inclusion_tag('crm/components/identity.html')
 def company_identity(company,large=False):
-    words=re.findall(r'[^\W\d_]+',company.name,flags=re.UNICODE)
+    words=re.findall(r'[^\W\d_]+',company_short_name(company.name),flags=re.UNICODE)
     legal={'ООО','ОДО','ОАО','ЗАО','ИП','ЧУП','УП','ЧТУП','ЧТПУП','ПТУП'}
     words=[word for word in words if word.upper() not in legal]
     initials=''.join(word[0] for word in words[:2]).upper() or company.unp[-2:]
@@ -96,10 +96,18 @@ def status_values(choices):
 @register.inclusion_tag('crm/components/phone_actions.html')
 def phone_actions(contact,company,with_search=False):
     from crm.normalization import messenger_phone
-    return {'contact':contact,'company':company,'number':messenger_phone(contact.raw) if contact else '', 'with_search':with_search}
+    return {'contact':contact,'company':company,'number':messenger_phone(contact.raw) if contact else '', 'with_search':with_search,'telegram_visible':not contact or contact.telegram_state!='absent','viber_visible':not contact or contact.viber_state!='absent'}
 
 @register.inclusion_tag('crm/components/company_search.html')
 def company_search(company,compact=False):
     from urllib.parse import urlencode
     query=company.name.strip() or company.unp
     return {'company':company,'compact':compact,'search_url':'https://www.google.com/search?'+urlencode({'q':query})}
+
+
+@register.filter
+def company_short_name(value):
+    text=value.strip()
+    prefixes=r'^(?:Общество с ограниченной ответственностью|Общество с дополнительной ответственностью|Открытое акционерное общество|Закрытое акционерное общество|Индивидуальный предприниматель|Частное торговое унитарное предприятие|Частное унитарное предприятие|ООО|ОДО|ОАО|ЗАО|ЧУП|ЧТУП|ИП)(?=\s|[«"“])\s*'
+    short=re.sub(prefixes,'',text,flags=re.IGNORECASE).strip(' «»"“”')
+    return short or text

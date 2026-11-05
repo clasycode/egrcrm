@@ -1,5 +1,4 @@
 """Complete plain-text company brief; no UI truncation or external transmission."""
-import json
 from django.utils import timezone
 
 def date(value):
@@ -10,6 +9,7 @@ def company_brief(row):
     lines=['КАРТОЧКА КОМПАНИИ',row.name or 'Название не получено',f'УНП: {row.unp}',f'Страна: {row.country}',f'Тип: {row.get_kind_display()}',f'Регистрация: {date(row.registered_on)}',f'Состояние ЕГР: {row.egr_state or "Не получено"}',f'Добавлена в CRM: {date(row.admitted_at)}','', 'РАБОТА С КОМПАНИЕЙ',f'CRM-статус: {row.status}',f'Ответственный: {row.owner.get_full_name() or row.owner.username if row.owner else "Не назначен"}',f'Не связываться: {"ДА" if row.do_not_contact else "Нет"}',f'Заметки:\n{row.notes or "Нет заметок"}', '', 'АДРЕС И ГЕОГРАФИЯ',f'Текущий адрес: {row.current_address or "Не получен"}',f'Область: {row.region or "Не получена"}',f'Город: {row.city or "Не получен"}',f'Район: {row.district or "Не получен"}', '', 'КОНТАКТЫ']
     for contact in row.contacts.all():
         lines.extend([f'- {contact.get_kind_display()}: {contact.raw}',f'  Актуальность по источнику: {"Текущий" if contact.current else "Исторический"}; проверка: {contact.verification}',f'  Не связываться: {"ДА" if contact.do_not_contact else "Нет"}; источник: {contact.source}',f'  Первое/последнее получение: {date(contact.first_seen)} / {date(contact.last_seen)}',f'  Комментарий: {contact.comment or "Нет"}'])
+        if contact.kind=='phone':lines.append(f'  Telegram: {contact.get_telegram_state_display()}; Viber: {contact.get_viber_state_display()}')
         lines.append(f'  Последняя ручная проверка: {date(contact.checked_at)}; проверил: {contact.checked_by.username if contact.checked_by else "Не указан"}')
         for check in contact.checks.select_related('actor').order_by('created_at','pk'):
             lines.append(f'  Проверка {date(check.created_at)}: {check.result}; {check.note}')
@@ -31,8 +31,25 @@ def company_brief(row):
     for website in row.website_searches.order_by('created_at','pk'):lines.append(f'- {website.url or "Без адреса"} | {website.get_state_display()}\n  {website.evidence}')
     lines+=['','ИСТОРИЯ ИЗМЕНЕНИЙ CRM']
     for audit in row.audit.select_related('actor').order_by('created_at','pk'):
-        lines.append(f'- {date(audit.created_at)} | {audit.actor.username if audit.actor else "Система"}\n'+json.dumps(audit.changes,ensure_ascii=False,indent=2))
-    lines+=['','СВЕДЕНИЯ ИСТОЧНИКА ЕГР (JSON)',json.dumps(row.source_data,ensure_ascii=False,indent=2),'','ИСТОРИЯ СНИМКОВ ЕГР']
-    for snapshot in row.snapshots.order_by('observed_at','pk'):lines.extend([date(snapshot.observed_at),json.dumps(snapshot.data,ensure_ascii=False,indent=2)])
-    lines+=['','Примечание: текущие сведения ЕГР и ручная проверка контакта — разные признаки. Запреты обращений необходимо учитывать.']
+        lines.append(f'- {date(audit.created_at)} | {audit.actor.username if audit.actor else "Система"}')
+        lines.extend(audit_text(audit.changes))
     return '\n'.join(lines)
+
+
+LABELS={'notes':'Заметки','status':'Статус','do_not_contact':'Запрет обращения','owner':'Ответственный','contact':'Контакт','contact_check':'Проверка контакта','review':'Итог обработки','task':'Задача','interaction':'Обращение','reason':'Причина','raw':'Значение контакта','kind':'Тип','comment':'Комментарий','title':'Название','due_at':'Срок','before':'Было','after':'Стало','manual_contact':'Ручной контакт'}
+def readable(value):
+    if value is None or value=='':return 'Не указано'
+    if value is True:return 'Да'
+    if value is False:return 'Нет'
+    if isinstance(value,dict):return '; '.join(f'{LABELS.get(k,k)}: {readable(v)}' for k,v in value.items())
+    if isinstance(value,(list,tuple)):return '; '.join(readable(v) for v in value)
+    return str(value)
+
+def audit_text(changes):
+    if not isinstance(changes,dict):return ['  '+readable(changes)]
+    result=[]
+    for key,value in changes.items():
+        if isinstance(value,dict) and 'before' in value and 'after' in value:
+            result.append(f'  {LABELS.get(key,key)}: {readable(value["before"])} → {readable(value["after"])}')
+        else:result.append(f'  {LABELS.get(key,key)}: {readable(value)}')
+    return result
