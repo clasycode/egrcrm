@@ -96,7 +96,7 @@ def status_values(choices):
 @register.inclusion_tag('crm/components/phone_actions.html')
 def phone_actions(contact,company,with_search=False):
     from crm.normalization import messenger_phone
-    return {'contact':contact,'company':company,'number':messenger_phone(contact.raw) if contact else '', 'with_search':with_search,'telegram_visible':not contact or contact.telegram_state!='absent','viber_visible':not contact or contact.viber_state!='absent'}
+    return {'contact':contact,'company':company,'number':messenger_phone(contact.raw) if contact else '', 'with_search':with_search}
 
 @register.inclusion_tag('crm/components/company_search.html')
 def company_search(company,compact=False):

@@ -587,7 +587,6 @@ tbody>tr:focus-within{background:#eef0e8}
 .company-table .quick-action:hover{background:var(--color-linen);border-color:var(--color-ink)}
 .company-table .quick-action.is-visited{background:#ece6eb;border-color:#b8a5b5}
 .company-table .quick-action .icon{width:15px;height:15px}
-.company-table .messenger-edit{border-color:transparent;color:#7c8074}
 .company-table .owner-line{font-size:11px;line-height:1.5;margin-top:8px;align-items:flex-start}
 .company-table .owner-line>span{overflow-wrap:anywhere}
 .company-table .owner-line .icon{margin-top:2px;flex-shrink:0}

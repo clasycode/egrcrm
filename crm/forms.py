@@ -81,8 +81,6 @@ class ManualContactForm(forms.ModelForm):
         labels={'kind':'Тип контакта','raw':'Значение','comment':'Комментарий'}
 
 class ContactCheckForm(forms.Form):
-    telegram_state=forms.ChoiceField(choices=Contact.MESSENGER_STATES,required=False,label='Telegram — ручная проверка',help_text='«Не найден» скрывает иконку. Это может зависеть от приватности, а не от наличия регистрации.')
-    viber_state=forms.ChoiceField(choices=Contact.MESSENGER_STATES,required=False,label='Viber — ручная проверка',help_text='Если вы не проверяли номер, оставьте «Не проверено».')
     verification=forms.ChoiceField(choices=[(v,v) for v in PHONE_RESULTS],label='Результат проверки')
     comment=forms.CharField(required=False,widget=forms.Textarea,label='Комментарий')
     do_not_contact=forms.BooleanField(required=False,label='Не связываться с этим контактом')

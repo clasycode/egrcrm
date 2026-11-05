@@ -49,6 +49,7 @@ class Company(models.Model):
 
 
 class Contact(models.Model):
+    # Legacy 3.5 archive fields only; availability checks are disabled.
     MESSENGER_STATES=[('unknown','Не проверено'),('present','Найден вручную'),('absent','Не найден при ручной проверке')]
     telegram_state = models.CharField(max_length=10,choices=MESSENGER_STATES,default='unknown')
     viber_state = models.CharField(max_length=10,choices=MESSENGER_STATES,default='unknown')

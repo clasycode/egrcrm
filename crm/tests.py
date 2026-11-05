@@ -956,27 +956,26 @@ class ReadableTablesAndMessengerTests(TestCase):
         self.assertContains(response,'scope="col"')
         self.row.refresh_from_db();self.assertEqual(self.row.name,'Общество с ограниченной ответственностью "ЛавХаус"')
 
-    def test_only_manual_absence_hides_that_channel_and_can_be_reversed(self):
-        telegram='https://t.me/+375336454857';viber='viber://chat?number=%2B375336454857'
+    def test_messenger_links_ignore_old_marks_in_table_card_and_fragment(self):
+        self.phone.telegram_state='absent';self.phone.viber_state='absent';self.phone.save()
         for path in ('/',f'/companies/{self.row.pk}/','/companies/fragment/'):
-            self.assertContains(self.client.get(path),telegram)
-            self.assertContains(self.client.get(path),viber)
-        url=f'/contacts/{self.phone.pk}/check/'
-        response=self.client.post(url,{'verification':'Не проверен','comment':'Проверил вручную','telegram_state':'absent','viber_state':'present'})
-        self.assertEqual(response.status_code,302)
-        for path in ('/',f'/companies/{self.row.pk}/','/companies/fragment/'):
-            self.assertNotContains(self.client.get(path),telegram)
-            self.assertContains(self.client.get(path),viber)
-        self.client.post(url,{'verification':'Не проверен','telegram_state':'unknown','viber_state':'absent'})
-        self.assertContains(self.client.get('/'),telegram)
-        self.assertNotContains(self.client.get('/'),viber)
-        self.phone.refresh_from_db();self.assertEqual(self.phone.checked_by,self.user)
+            response=self.client.get(path)
+            self.assertContains(response,'https://t.me/+375336454857')
+            self.assertContains(response,'viber://chat?number=%2B375336454857')
+            self.assertNotContains(response,'messenger-edit')
+            self.assertNotContains(response,'Не найден при ручной проверке')
+        text=self.client.get(f'/companies/{self.row.pk}/copy/').content.decode()
+        self.assertNotIn('Telegram:',text)
+        self.assertNotIn('Viber:',text)
 
-    def test_omitted_fields_keep_existing_marks_and_changed_number_resets_them(self):
-        self.phone.telegram_state='absent';self.phone.viber_state='present';self.phone.save()
-        self.client.post(f'/contacts/{self.phone.pk}/check/',{'verification':'ЛПР','comment':'Обычная проверка'})
-        self.phone.refresh_from_db();self.assertEqual(self.phone.telegram_state,'absent')
-        self.assertEqual(self.phone.viber_state,'present')
-        self.client.post(f'/contacts/{self.phone.pk}/edit/',{'kind':'phone','raw':'+375298893777','comment':'Новый номер'})
-        self.phone.refresh_from_db();self.assertEqual(self.phone.telegram_state,'unknown')
+    def test_availability_fields_removed_from_forms_and_ignored_in_post(self):
+        response=self.client.get(f'/contacts/{self.phone.pk}/check/')
+        self.assertNotContains(response,'name="telegram_state"')
+        self.assertNotContains(response,'name="viber_state"')
+        self.client.post(f'/contacts/{self.phone.pk}/check/',{'verification':'ЛПР','comment':'Контакт проверен','telegram_state':'absent','viber_state':'absent'})
+        self.phone.refresh_from_db()
+        self.assertEqual(self.phone.verification,'ЛПР')
+        self.assertEqual(self.phone.telegram_state,'unknown')
         self.assertEqual(self.phone.viber_state,'unknown')
+        from django.contrib import admin
+        self.assertNotIn('telegram_state',admin.site._registry[Contact].get_form(self.client.get('/').wsgi_request).base_fields)
