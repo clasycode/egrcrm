@@ -6,7 +6,7 @@
 <nav aria-label="Рабочее пространство"><div class="nav-group"><p class="nav-group-label">Рабочее пространство</p>
 <a class="nav-link" href="/" {% if ui_nav == 'companies' %}aria-current="page"{% endif %}>{% ui_icon 'companies' %}<span>Компании</span><span class="nav-count">{{ ui_counts.total }}</span></a>
 <a class="nav-link" href="/?new=1" {% if ui_nav == 'new' %}aria-current="page"{% endif %}>{% ui_icon 'new' %}<span>Новые</span><span class="nav-count">{{ ui_counts.new }}</span></a>
-<a class="nav-link" href="/?status=Клиент" {% if ui_nav == 'clients' %}aria-current="page"{% endif %}>{% ui_icon 'clients' %}<span>Клиенты</span><span class="nav-count">{{ ui_counts.clients }}</span></a>
+<a class="nav-link" href="/?status=Клиент" {% if ui_nav == 'clients' %}aria-current="page"{% endif %}>{% ui_icon 'clients' %}<span>Клиенты</span><span class="nav-count" data-client-count>{{ ui_counts.clients }}</span></a>
 <a class="nav-link" href="/tasks/" {% if ui_nav == 'tasks' %}aria-current="page"{% endif %}>{% ui_icon 'tasks' %}<span>Задачи</span>{% if ui_counts.overdue %}<span class="nav-count warning" title="Просроченные задачи">{{ ui_counts.overdue }}</span>{% endif %}</a>
 <a class="nav-link" href="/selections/" {% if ui_nav == 'selections' %}aria-current="page"{% endif %}>{% ui_icon 'collections' %}<span>Подборки</span></a></div>
 <div class="nav-group"><p class="nav-group-label">Данные и результаты</p>{% if crm_owner %}<a class="nav-link" href="/imports/" {% if ui_nav == 'imports' %}aria-current="page"{% endif %}>{% ui_icon 'collect' %}<span>Сбор данных</span></a>{% endif %}

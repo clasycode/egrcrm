@@ -622,3 +622,125 @@ class DesignSystemTests(TestCase):
         self.assertEqual(len(ids),len(set(ids)))
         self.assertContains(response,'manual_')
         self.assertContains(response,'interaction_')
+
+@override_settings(SECURE_SSL_REDIRECT=False,SESSION_COOKIE_SECURE=False)
+class InlineStatusTests(TestCase):
+    def setUp(self):
+        from .models import AccessProfile
+        self.user=get_user_model().objects.create_user('inline-manager',password='test-password')
+        AccessProfile.objects.create(user=self.user,role='manager')
+        self.client.force_login(self.user)
+        self.row=enrich(Fake(),'123')
+        self.row.notes='Сохранить заметку';self.row.do_not_contact=True;self.row.owner=self.user
+        self.row.save()
+        self.url=f'/companies/{self.row.pk}/status/'
+
+    def post_status(self,status,previous='Новая'):
+        return self.client.post(self.url,{'status':status,'previous_status':previous},HTTP_ACCEPT='application/json')
+
+    def test_manager_can_change_only_status_without_opening_card(self):
+        from .models import Audit
+        self.assertEqual(self.post_status('Клиент').status_code,200)
+        self.row.refresh_from_db()
+        self.assertEqual(self.row.status,'Клиент')
+        self.assertEqual(self.row.notes,'Сохранить заметку')
+        self.assertTrue(self.row.do_not_contact)
+        self.assertEqual(self.row.owner,self.user)
+        self.assertIsNone(self.row.viewed_at)
+        self.assertEqual(Audit.objects.filter(company=self.row).latest('pk').changes,{'status':{'before':'Новая','after':'Клиент'}})
+        fragment=self.client.get('/companies/fragment/')
+        self.assertContains(fragment,'data-inline-status')
+        self.assertContains(fragment,'value="Переговоры"')
+
+    def test_stale_change_and_unknown_stage_are_rejected(self):
+        self.assertEqual(self.post_status('Клиент').status_code,200)
+        self.assertEqual(self.post_status('Отказ').status_code,409)
+        self.assertEqual(self.post_status('<script>',previous='Клиент').status_code,400)
+        self.row.refresh_from_db();self.assertEqual(self.row.status,'Клиент')
+
+    def test_login_post_and_csrf_required(self):
+        from django.test import Client as TestClient
+        self.assertEqual(self.client.get(self.url).status_code,405)
+        protected=TestClient(enforce_csrf_checks=True);protected.force_login(self.user)
+        self.assertEqual(protected.post(self.url,{'status':'Клиент','previous_status':'Новая'}).status_code,403)
+        self.client.logout()
+        self.assertEqual(self.post_status('Клиент').status_code,302)
+        self.row.refresh_from_db();self.assertEqual(self.row.status,'Новая')
+
+    def test_non_ajax_fallback_and_safe_redirect(self):
+        response=self.client.post(self.url,{'status':'В работе','previous_status':'Новая','next':'https://outside.example/'})
+        self.assertRedirects(response,'/',fetch_redirect_response=False)
+        self.row.refresh_from_db();self.assertEqual(self.row.status,'В работе')
+
+    def test_noop_does_not_add_audit_and_unadmitted_company_cannot_change(self):
+        from .models import Audit
+        before=Audit.objects.count()
+        self.assertEqual(self.post_status('Новая').status_code,200)
+        self.assertEqual(Audit.objects.count(),before)
+        self.row.admitted_at=None;self.row.save(update_fields=['admitted_at'])
+        self.assertEqual(self.post_status('Клиент').status_code,404)
+
+
+@override_settings(SECURE_SSL_REDIRECT=False,SESSION_COOKIE_SECURE=False)
+class DashboardTests(TestCase):
+    def test_period_cohort_distinct_companies_and_chronology(self):
+        from .models import Interaction
+        from .dashboard import dashboard_context
+        from django.utils import timezone
+        from datetime import timedelta
+        row=enrich(Fake(),'123');other=Company.objects.create(unp='456',kind=1,admitted_at=timezone.now(),registered_on=timezone.localdate())
+        at=timezone.now()-timedelta(days=2)
+        # A reply before the first call must not improve the response rate.
+        Interaction.objects.create(company=row,kind='reply',result='answered',occurred_at=at-timedelta(hours=1))
+        Interaction.objects.create(company=row,kind='call',result='attempt',occurred_at=at)
+        Interaction.objects.create(company=row,kind='message',result='attempt',occurred_at=at+timedelta(minutes=1))
+        Interaction.objects.create(company=row,kind='note',result='client',occurred_at=at+timedelta(hours=1))
+        Interaction.objects.create(company=other,kind='call',result='client',occurred_at=at)
+        Interaction.objects.create(company=other,kind='reply',result='answered',occurred_at=at+timedelta(hours=1))
+        result=dashboard_context({})
+        self.assertEqual((result['outgoing_events'],result['contacted'],result['answered'],result['clients']),(3,2,1,1))
+        self.assertEqual(result['response_conversion'],50)
+        self.assertEqual(sum(p['outgoing'] for p in result['trend']),3)
+        self.assertEqual(result['period_days'],30)
+        # A result outside the selected date range cannot enter the cohort.
+        day=(timezone.localdate()-timedelta(days=1)).isoformat()
+        result=dashboard_context({'start':day,'end':day})
+        self.assertEqual(result['contacted'],0)
+        self.assertIsNone(result['response_conversion'])
+        self.assertEqual(result['total'],2)
+
+    def test_quality_counts_companies_once_and_unknown_dates_visible(self):
+        from django.utils import timezone
+        from .models import Contact
+        from .dashboard import dashboard_context
+        row=enrich(Fake(phone='111'),'123')
+        Contact.objects.create(company=row,kind='phone',raw='222',current=False)
+        other=Company.objects.create(unp='456',kind=1,admitted_at=timezone.now(),registered_on=None)
+        Contact.objects.create(company=other,kind='phone',raw='333',current=False)
+        Contact.objects.create(company=other,kind='phone',raw='444',current=False)
+        other.registered_on=None;other.save(update_fields=['registered_on'])
+        data=dashboard_context({})
+        quality={item['label']:item['total'] for item in data['quality_bars']}
+        self.assertEqual(quality['Есть телефон'],2)
+        self.assertEqual(quality['Телефон текущий по ЕГР'],1)
+        self.assertEqual(quality['Только исторические телефоны'],1)
+        self.assertEqual(next(item['total'] for item in data['age_bars'] if item['label']=='Дата не получена'),1)
+        self.assertEqual(sum(item['total'] for item in data['status_bars']),2)
+        self.assertEqual(sum(item['total'] for item in data['region_bars']),2)
+
+    def test_invalid_range_and_empty_data_do_not_report_fake_conversions(self):
+        from .dashboard import dashboard_context
+        from django.utils import timezone
+        from datetime import timedelta
+        empty=dashboard_context({})
+        self.assertIsNone(empty['response_conversion'])
+        self.assertIsNone(empty['client_conversion'])
+        self.assertEqual(empty['trend_peak'],0)
+        for params in [{'start':'bad','end':'2026-01-01'}, {'start':'2026-02-02','end':'2026-01-01'}, {'start':'2020-01-01','end':'2026-01-01'}, {'start':timezone.localdate().isoformat(),'end':(timezone.localdate()+timedelta(days=1)).isoformat()}]:
+            with self.subTest(params=params):
+                data=dashboard_context(params)
+                self.assertFalse(data['period_valid'])
+                self.assertEqual(data['contacted'],0)
+        data=dashboard_context({'days':'90'})
+        self.assertEqual(data['period_days'],90)
+        self.assertTrue(data['trend_monthly'])

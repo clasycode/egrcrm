@@ -4,7 +4,7 @@ from django.shortcuts import render,get_object_or_404,redirect
 from django.contrib import messages
 from django.db.models import Q,Count,Max
 from django.utils import timezone
-from django.http import JsonResponse,HttpResponseBadRequest,FileResponse
+from django.http import JsonResponse,HttpResponseBadRequest,FileResponse,HttpResponseNotAllowed
 from .access import allowed,owner_only,is_owner
 from .models import *
 from .forms import TaskForm,InteractionForm,ManualContactForm,ContactCheckForm,StatusForm
@@ -69,6 +69,42 @@ def company(request,pk):
             parts.append(f'{labels.get(key,key)}: {value.get("before","")} → {value.get("after","")}' if isinstance(value,dict) else str(value))
         events.append({'at':entry.created_at,'actor':entry.actor,'text':'; '.join(parts)})
     return render(request,'crm/detail.html',{'row':row,'statuses':status_choices()+([] if row.status in dict(status_choices()) else [(row.status,row.status)]),'team':team(),'task_form':task_form,'interaction_form':interaction_form,'manual_form':manual_form,'contacts':contacts,'common':common,'events':events,'recent_outreach':row.interactions.filter(kind__in=['call','message'],occurred_at__gte=timezone.now()-timedelta(days=1)).exists(),'last_outreach':row.interactions.filter(kind__in=['call','message']).aggregate(at=Max('occurred_at'))['at'],'snapshots':row.snapshots.all()[:30]})
+
+@allowed
+def company_status(request,pk):
+    """Update only the CRM stage; never overwrite card notes or contact bans."""
+    from django.core.cache import cache
+    from django.utils.http import url_has_allowed_host_and_scheme
+    from django.template.loader import render_to_string
+    if request.method != 'POST':
+        return HttpResponseNotAllowed(['POST'])
+    row=get_object_or_404(Company.objects.select_for_update(),pk=pk,admitted_at__isnull=False)
+    wants_json=request.headers.get('Accept')=='application/json'
+    status=request.POST.get('status','')
+    error=''
+    code=400
+    if status not in dict(status_choices()):
+        error='Этот статус недоступен. Обновите список и выберите действующий статус.'
+    elif request.POST.get('previous_status') != row.status:
+        error=f'Статус уже изменён: «{row.status}». Обновите список перед повторной правкой.'
+        code=409
+    if error:
+        if wants_json: return JsonResponse({'error':error},status=code)
+        messages.error(request,error)
+    else:
+        before=row.status
+        if before != status:
+            row.status=status
+            row.save(update_fields=['status'])
+            log(row,request.user,status={'before':before,'after':status})
+            cache.delete('crm-nav-counts-v31')
+        if wants_json:
+            from .templatetags.ui import stage_badge
+            return JsonResponse({'status':row.status,'badge':render_to_string('crm/components/status.html',stage_badge(row.status)),'clients':Company.objects.filter(admitted_at__isnull=False,status='Клиент').count()})
+        messages.success(request,f'Статус компании изменён: {row.status}')
+    target=request.POST.get('next','/')
+    if not url_has_allowed_host_and_scheme(target,allowed_hosts={request.get_host()},require_https=request.is_secure()): target='/'
+    return redirect(target)
 
 @allowed
 def contact_check(request,pk):

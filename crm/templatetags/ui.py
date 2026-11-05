@@ -84,3 +84,7 @@ def company_contacts(company):
     phone=(current or phones or [None])[0]
     email=([c for c in emails if c.current] or emails or [None])[0]
     return {'phone':phone,'email':email,'other':max(0,len(phones)+len(emails)-bool(phone)-bool(email)),'company':company}
+
+@register.filter
+def status_values(choices):
+    return [value for value,label in choices]

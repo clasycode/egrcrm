@@ -178,25 +178,8 @@ def day_export(request,pk):
 
 @allowed
 def statistics(request):
-    from .models import Candidate,Contact,Interaction,Task,Activity
-    from django.db.models import Count
-    rows=Company.objects.filter(admitted_at__isnull=False)
-    events=Interaction.objects.filter(company__admitted_at__isnull=False)
-    from datetime import date,timedelta
-    for key,lookup in [('start','occurred_at__date__gte'),('end','occurred_at__date__lte')]:
-        try: value=date.fromisoformat(request.GET.get(key,''))
-        except ValueError: continue
-        events=events.filter(**{lookup:value})
-    outgoing=events.filter(kind__in=['call','message'])
-    answered=events.filter(Q(kind='reply')|Q(kind__in=['call','message'],result__in=['answered','negotiation','client']))
-    contacted=outgoing.values('company_id').distinct()
-    contacted_count=contacted.count()
-    answered_after_contact=answered.filter(company_id__in=contacted).values('company_id').distinct().count()
-    clients=events.filter(result='client',company_id__in=contacted).exclude(kind='note').values('company_id').distinct().count()
-    today=timezone.localdate()
-    ages=[('До 30 дней',rows.filter(registered_on__gte=today-timedelta(days=30)).count()),('31–90 дней',rows.filter(registered_on__lt=today-timedelta(days=30),registered_on__gte=today-timedelta(days=90)).count()),('91–365 дней',rows.filter(registered_on__lt=today-timedelta(days=90),registered_on__gte=today-timedelta(days=365)).count()),('Старше года',rows.filter(registered_on__lt=today-timedelta(days=365)).count())]
-    context={'total':rows.count(),'new':rows.filter(viewed_at__isnull=True).count(),'candidates':Candidate.objects.values('unp').distinct().count(),'without':Company.objects.filter(admitted_at__isnull=True).count(),'statuses':rows.values('status').annotate(total=Count('id')).order_by('status'),'phones':Contact.objects.filter(company__admitted_at__isnull=False,kind='phone').values('company_id').distinct().count(),'emails':Contact.objects.filter(company__admitted_at__isnull=False,kind='email').values('company_id').distinct().count(),'current_phones':rows.filter(contacts__kind='phone',contacts__current=True).distinct().count(),'historical_phones':rows.filter(contacts__kind='phone',contacts__current=False).distinct().count(),'contacted':contacted_count,'outgoing_events':outgoing.count(),'answered':answered.values('company_id').distinct().count(),'negotiations':events.filter(result='negotiation').exclude(kind='note').values('company_id').distinct().count(),'clients':clients,'refused':events.filter(result='refusal').exclude(kind='note').values('company_id').distinct().count(),'response_conversion':round(100*answered_after_contact/contacted_count,1) if contacted_count else None,'client_conversion':round(100*clients/contacted_count,1) if contacted_count else None,'done_tasks':Task.objects.filter(completed_at__isnull=False).count(),'overdue':Task.objects.filter(completed_at__isnull=True,due_at__lt=timezone.now()).count(),'regions':rows.values('region').annotate(total=Count('pk')).order_by('-total')[:30],'types':rows.values('kind').annotate(total=Count('pk')),'ages':ages,'activities':Activity.objects.filter(company__admitted_at__isnull=False,current=True).values('code','name').annotate(total=Count('company',distinct=True)).order_by('-total')[:30],'reasons':events.filter(result='refusal').exclude(note='').order_by('-occurred_at')[:30]}
-    return render(request,'crm/statistics.html',context)
+    from .dashboard import dashboard_context
+    return render(request,'crm/statistics.html',dashboard_context(request.GET))
 
 @allowed
 def import_progress(request):
@@ -224,7 +207,7 @@ def reset_imports(request):
 def company_fragment(request):
     from django.core.paginator import Paginator
     params=request.GET.copy();params.pop('page',None)
-    return render(request,'crm/company_table.html',{'rows':Paginator(company_query(request),50).get_page(request.GET.get('page')),'query':params.urlencode()})
+    return render(request,'crm/company_table.html',{'rows':Paginator(company_query(request),50).get_page(request.GET.get('page')),'query':params.urlencode(),'statuses':status_choices()})
 
 @owner_only
 def job_fragment(request):
