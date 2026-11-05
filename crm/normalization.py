@@ -20,3 +20,14 @@ def search_contact(raw):
     if re.fullmatch(r'[+()0-9\s.\-/]+',raw) and any(c.isdigit() for c in raw):
         return re.sub(r'\D','',raw)
     return raw.casefold()
+
+
+def messenger_phone(raw):
+    """Only expose a single, valid E.164 number to messenger deep links."""
+    if not re.fullmatch(r'[+0-9()\s.\-]+',raw.strip()): return ''
+    try:
+        phone=phonenumbers.parse(raw,'BY')
+        if phonenumbers.is_valid_number(phone) and not phone.extension:
+            return phonenumbers.format_number(phone,phonenumbers.PhoneNumberFormat.E164)
+    except phonenumbers.NumberParseException: pass
+    return ''

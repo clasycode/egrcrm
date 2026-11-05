@@ -744,3 +744,58 @@ class DashboardTests(TestCase):
         data=dashboard_context({'days':'90'})
         self.assertEqual(data['period_days'],90)
         self.assertTrue(data['trend_monthly'])
+
+@override_settings(SECURE_SSL_REDIRECT=False,SESSION_COOKIE_SECURE=False)
+class ContactShortcutTests(TestCase):
+    def test_messenger_numbers_are_single_valid_international_numbers(self):
+        from .normalization import messenger_phone
+        for raw,expected in [('+375 (29) 889-37-77','+375298893777'),('+7 929 351 82 85','+79293518285'),('8 (029) 889-37-77','+375298893777'),('123',''),('javascript:alert(1)',''),('+375298893777; +375299876543',''),('','')]:
+            with self.subTest(raw=raw):self.assertEqual(messenger_phone(raw),expected)
+
+    def test_rendered_links_are_encoded_and_shared_in_table_and_card(self):
+        from django.utils import timezone
+        from urllib.parse import urlparse,parse_qs
+        from html.parser import HTMLParser
+        class Links(HTMLParser):
+            def __init__(self):super().__init__();self.links=[]
+            def handle_starttag(self,tag,attrs):
+                if tag=='a':self.links.append(dict(attrs))
+        user=get_user_model().objects.create_superuser('shortcut-owner','owner@example.test','test-password')
+        self.client.force_login(user)
+        row=Company.objects.create(unp='900000123',kind=1,name='ООО «Клён & Ко» <script>',admitted_at=timezone.now())
+        contact=Contact.objects.create(company=row,kind='phone',raw='+375 (29) 889-37-77',current=True)
+        expected_key=f'phone:{row.pk}:{contact.pk}:telegram:+375298893777'
+        for path in ['/',f'/companies/{row.pk}/','/companies/fragment/']:
+            response=self.client.get(path)
+            self.assertEqual(response.status_code,200)
+            parser=Links();parser.feed(response.content.decode())
+            telegram=next(link for link in parser.links if link.get('href','').startswith('https://t.me/'))
+            self.assertEqual(telegram['href'],'https://t.me/+375298893777')
+            self.assertEqual(telegram['data-external-action'],expected_key)
+            self.assertEqual(telegram['target'],'_blank')
+            self.assertIn('noopener',telegram['rel'])
+            viber=next(link for link in parser.links if link.get('href','').startswith('viber://'))
+            self.assertEqual(parse_qs(urlparse(viber['href']).query)['number'],['+375298893777'])
+            google=next(link for link in parser.links if link.get('href','').startswith('https://www.google.com/search?'))
+            self.assertEqual(parse_qs(urlparse(google['href']).query)['q'],[row.name])
+            self.assertEqual(google['target'],'_blank')
+            self.assertIn('noreferrer',google['rel'])
+            self.assertNotIn(row.name,response.content.decode())
+
+    def test_invalid_number_has_no_messenger_target_and_unnamed_company_uses_unp(self):
+        from .templatetags.ui import company_search
+        from django.template import Template,Context
+        row=Company(unp='900000123',kind=1,name='')
+        contact=Contact(raw='123',kind='phone')
+        html=Template('{% load ui %}{% phone_actions contact row %}').render(Context({'row':row,'contact':contact}))
+        self.assertNotIn('viber://',html);self.assertNotIn('https://t.me/',html)
+        self.assertEqual(company_search(row)['search_url'],'https://www.google.com/search?q=900000123')
+
+    def test_settings_forms_render_with_separate_status_rows_and_fields(self):
+        user=get_user_model().objects.create_superuser('settings-layout-owner','owner@example.test','test-password')
+        self.client.force_login(user)
+        response=self.client.get('/settings/')
+        self.assertContains(response,'settings-status-row')
+        self.assertContains(response,'Новый статус')
+        self.assertContains(response,'name="position"')
+        self.assertContains(response,'name="active"')

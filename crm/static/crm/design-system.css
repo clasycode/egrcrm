@@ -461,3 +461,47 @@ h1{font-size:29px}
 @media(max-width:1050px){.dashboard-grid{grid-template-columns:minmax(0,1fr)}.dashboard-attention{grid-template-columns:minmax(0,1fr)}.dashboard-attention>a,.dashboard-attention>div{border-right:0;border-bottom:1px solid var(--border-soft)}.dashboard-attention>:last-child{border-bottom:0}}
 @media(max-width:700px){.dashboard-section-heading{align-items:flex-start}.dashboard-section-heading h2{font-size:21px}.dashboard-period-form{gap:12px}.period-field{flex:1;max-width:none;min-width:130px}.dashboard-period-form>.small{padding-top:0}.dashboard-period-form>button{width:100%}.dashboard-grid{gap:16px}.trend-plot{gap:2px}.chart-legend{gap:8px}.bar-chart-row{gap:6px 8px}.bar-chart-value{gap:6px}.bar-chart-value span{min-width:32px}.dashboard-grid .panel-header{gap:8px;flex-wrap:wrap}}
 .empty-state-actions{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+/* Contact shortcuts share one visual language and persist attempted opens locally. */
+.contact-quick-actions{display:flex;gap:6px;align-items:center;margin:4px 0 8px;flex-wrap:wrap}
+.quick-action{display:inline-flex;align-items:center;justify-content:center;gap:6px;position:relative;min-width:30px;min-height:30px;padding:6px;border:1px solid var(--color-stone);border-radius:4px;background:transparent;color:var(--text-muted);font-size:10px;line-height:1.3;vertical-align:middle}
+.quick-action .icon{width:16px;height:16px;color:currentColor;margin:0;flex-shrink:0}
+.quick-action:hover{color:var(--color-ink);background:var(--color-linen);border-color:var(--color-ink);text-decoration:none}
+.quick-action.is-visited{color:var(--status-negotiating);background:#ece6eb;border-color:#b8a5b5}
+.quick-action.is-visited:after{content:'✓';display:grid;place-items:center;position:absolute;right:-4px;top:-5px;width:12px;height:12px;border-radius:2px;background:var(--color-bone);font-size:9px;line-height:1;color:var(--status-negotiating)}
+.company-web-search{margin-top:5px;text-align:left;justify-content:flex-start;max-width:100%}
+.contact-panel-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}
+.contact-panel-actions .company-web-search{margin-top:0}
+.settings-layout{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:24px;align-items:start}
+.settings-layout>.panel{margin:0;min-width:0}
+.settings-status-list{margin-top:20px}
+.settings-status-row{display:grid;grid-template-columns:minmax(0,1fr) 76px 92px;gap:12px;align-items:center;padding:12px 0;border-bottom:1px solid var(--border-soft)}
+.settings-status-row:last-child{border-bottom:0}
+.settings-status-name{min-width:0;justify-self:start}
+.settings-status-name .status{white-space:normal;overflow-wrap:anywhere}
+.settings-status-state{font-size:11px}
+.settings-status-row button{width:100%;min-height:32px}
+.settings-subsection{border-top:1px solid var(--color-stone);margin-top:24px;padding-top:24px}
+.settings-subsection h3{font-size:17px;margin-bottom:18px}
+.settings-form{max-width:100%}
+.settings-form input:not([type=checkbox]),.settings-form select{width:100%}
+.settings-form p{margin-bottom:18px}
+.settings-form p>label{margin-bottom:6px}
+.settings-form .helptext{display:block;font-size:11px;line-height:1.6;color:var(--text-muted);margin-top:6px}
+.settings-form ul{font-size:11px;color:var(--text-muted);padding-left:18px}
+.settings-field-grid{display:grid;grid-template-columns:minmax(0,1fr) 105px;gap:16px;margin-bottom:18px}
+.settings-field-grid label{margin-bottom:6px}
+.settings-form .checkbox-row{display:flex;align-items:center;gap:8px;margin-bottom:20px}
+.settings-form .checkbox-row label{margin:0}
+.settings-form .checkbox-row input{margin:0;flex-shrink:0}
+.settings-team>div{display:flex;align-items:center;gap:9px;padding:12px 0;border-bottom:1px solid var(--border-soft);font-size:12px;overflow-wrap:anywhere}
+.settings-team .icon{width:16px;color:var(--text-muted)}
+.settings-access{margin-top:24px}
+.settings-access details{border-top:1px solid var(--border-soft);padding:14px 0}
+.settings-access summary{display:flex;align-items:center;gap:14px;cursor:pointer;font-size:12px;list-style:none}
+.settings-access summary:before{content:'+';font-family:var(--font-mono);color:var(--text-muted)}
+.settings-access details[open]>summary:before{content:'−'}
+.settings-account-actions{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:24px;padding:20px 0 4px}
+.settings-account-actions .settings-field-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(max-width:1100px){.settings-layout{grid-template-columns:minmax(0,1fr)}.settings-account-actions{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:700px){.quick-action{min-width:34px;min-height:34px}.settings-status-row{grid-template-columns:minmax(0,1fr) 82px;gap:6px 10px}.settings-status-name{grid-column:1;grid-row:1}.settings-status-state{grid-column:1;grid-row:2;font-size:10px}.settings-status-row button{grid-column:2;grid-row:1/3}.settings-field-grid{grid-template-columns:minmax(0,1fr) 88px;gap:12px}.settings-account-actions .settings-field-grid{grid-template-columns:minmax(0,1fr)}}
+.contact-quick-actions .company-web-search{margin-top:0}

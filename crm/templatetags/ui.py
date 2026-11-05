@@ -4,6 +4,10 @@ from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 register=template.Library()
 ICONS={
+'telegram':'<path d="m21 4-4 16-6-5-4 3 1-6 10-6-8 8-6-2Z"/>',
+'viber':'<path d="M20 11c0 5-3 8-8 8H9l-4 3v-5c-2-2-3-4-3-7 0-5 3-8 9-8s9 3 9 9Z"/><path d="m7 7 2 2-1 2a9 9 0 0 0 4 4l2-1 2 2M13 6a5 5 0 0 1 4 4M13 9a2 2 0 0 1 1 1"/>',
+'browser':'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18Z"/>',
+
 'companies':'<rect x="3" y="3" width="13" height="18" rx="1"/><path d="M16 9h5v12H3M7 7h5M7 11h5M7 15h5M7 19h5"/>',
 'new':'<path d="M12 3v6m0 6v6M3 12h6m6 0h6M5.6 5.6l3 3m6.8 6.8 3 3m0-12.8-3 3m-6.8 6.8-3 3"/>',
 'clients':'<path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1L3.2 9.4l6.1-.9Z"/>',
@@ -88,3 +92,14 @@ def company_contacts(company):
 @register.filter
 def status_values(choices):
     return [value for value,label in choices]
+
+@register.inclusion_tag('crm/components/phone_actions.html')
+def phone_actions(contact,company,with_search=False):
+    from crm.normalization import messenger_phone
+    return {'contact':contact,'company':company,'number':messenger_phone(contact.raw) if contact else '', 'with_search':with_search}
+
+@register.inclusion_tag('crm/components/company_search.html')
+def company_search(company,compact=False):
+    from urllib.parse import urlencode
+    query=company.name.strip() or company.unp
+    return {'company':company,'compact':compact,'search_url':'https://www.google.com/search?'+urlencode({'q':query})}
