@@ -799,3 +799,117 @@ class ContactShortcutTests(TestCase):
         self.assertContains(response,'Новый статус')
         self.assertContains(response,'name="position"')
         self.assertContains(response,'name="active"')
+
+@override_settings(SECURE_SSL_REDIRECT=False,SESSION_COOKIE_SECURE=False)
+class DailyWorkTests(TestCase):
+    def setUp(self):
+        from django.utils import timezone
+        from .models import AccessProfile
+        self.user=get_user_model().objects.create_user('work-manager',password='test-password')
+        AccessProfile.objects.create(user=self.user,role='manager')
+        self.client.force_login(self.user)
+        self.row=Company.objects.create(unp='900000123',kind=1,name='Полное имя компании без обрезания',admitted_at=timezone.now(),notes='Важная заметка',do_not_contact=True)
+        Contact.objects.create(company=self.row,kind='phone',raw='+375298893777',current=True)
+
+    def test_explicit_completion_is_unique_and_preserves_card_fields(self):
+        from .models import CompanyReview,WorkDay
+        from .reviewing import summary
+        self.assertEqual(summary(self.user)['target'],15)
+        self.client.get(f'/companies/{self.row.pk}/')
+        self.assertEqual(summary(self.user)['done'],0)
+        self.client.get(f'/companies/{self.row.pk}/copy/')
+        self.assertEqual(summary(self.user)['done'],0)
+        payload={'company':self.row.pk,'result':'follow_up','note':'Вернуться и запланировать звонок','next':'/work/'}
+        self.assertRedirects(self.client.post('/work/complete/',payload),'/work/',fetch_redirect_response=False)
+        self.assertEqual(summary(self.user)['done'],1)
+        self.assertEqual(summary(self.user)['remaining'],14)
+        self.assertEqual(WorkDay.objects.get(user=self.user).target,15)
+        self.client.post('/work/complete/',dict(payload,note='Повторное нажатие'))
+        self.assertEqual(CompanyReview.objects.count(),1)
+        self.assertEqual(CompanyReview.objects.get().note,payload['note'])
+        self.row.refresh_from_db()
+        self.assertEqual(self.row.notes,'Важная заметка')
+        self.assertTrue(self.row.do_not_contact)
+        self.assertEqual(self.row.status,'Новая')
+        self.assertNotContains(self.client.get('/?unprocessed=1'),self.row.name)
+
+    def test_invalid_review_not_counted_and_other_users_have_personal_stats(self):
+        from .reviewing import summary
+        from .models import CompanyReview
+        for payload in [{'company':self.row.pk,'result':'ready','note':'   '},{'company':self.row.pk,'result':'bad','note':'Заметка'}]:
+            response=self.client.post('/work/complete/',payload)
+            self.assertEqual(response.status_code,400)
+            self.assertIn('data-has-errors="true"',response.content.decode())
+            self.assertIn('value="/work/"',response.content.decode())
+        self.assertEqual(CompanyReview.objects.count(),0)
+        self.client.post('/work/complete/',{'company':self.row.pk,'result':'ready','note':'Есть нужный контакт'})
+        other=get_user_model().objects.create_user('other-worker')
+        self.assertEqual(summary(other)['done'],0)
+        self.assertEqual(summary(other)['queue'],1)
+        self.assertEqual(summary(self.user)['queue'],0)
+
+    def test_goal_changes_do_not_rewrite_old_history(self):
+        from .models import WorkDay,WorkPreference
+        from .reviewing import summary,report
+        from django.utils import timezone
+        from datetime import timedelta
+        yesterday=timezone.localdate()-timedelta(days=1)
+        WorkDay.objects.create(user=self.user,day=yesterday,target=10)
+        self.assertEqual(self.client.post('/work/',{'target':20}).status_code,302)
+        self.assertEqual(summary(self.user)['target'],20)
+        self.assertEqual(WorkPreference.objects.get(user=self.user).daily_target,20)
+        self.assertEqual(WorkDay.objects.get(user=self.user,day=yesterday).target,10)
+        for bad in ('0','201','abc'):
+            self.assertEqual(self.client.post('/work/',{'target':bad}).status_code,200)
+            self.assertEqual(summary(self.user)['target'],20)
+        self.assertEqual(report(self.user,yesterday,timezone.localdate())['planned_days'],2)
+
+    def test_copy_contains_untruncated_business_data_without_writes(self):
+        from .models import Audit,Task,Interaction,CompanyReview
+        from django.utils import timezone
+        Task.objects.create(company=self.row,title='Следующая задача',due_at=timezone.now(),created_by=self.user)
+        Interaction.objects.create(company=self.row,actor=self.user,kind='call',result='attempt',note='Реальный итог звонка')
+        CompanyReview.objects.create(company=self.row,user=self.user,result='ready',note='Есть дальнейший план')
+        self.row.name='Длинное название '*40;self.row.save()
+        before=Audit.objects.count()
+        response=self.client.get(f'/companies/{self.row.pk}/copy/')
+        self.assertEqual(response.status_code,200)
+        text=response.json()['text']
+        for value in (self.row.name,self.row.unp,'Важная заметка','+375298893777','Следующая задача','Реальный итог звонка','Есть дальнейший план','Не связываться: ДА','СВЕДЕНИЯ ИСТОЧНИКА ЕГР'):
+            self.assertIn(value,text)
+        self.assertEqual(response['Cache-Control'],'no-store')
+        self.assertEqual(Audit.objects.count(),before)
+        self.row.refresh_from_db();self.assertIsNone(self.row.viewed_at)
+        self.client.logout();self.assertEqual(self.client.get(f'/companies/{self.row.pk}/copy/').status_code,302)
+
+    def test_work_screens_and_processing_analytics(self):
+        self.assertContains(self.client.get('/work/'),'План на сегодня')
+        self.assertContains(self.client.get('/statistics/'),'Моя обработка за период')
+        self.assertEqual(self.client.get('/work/complete/').status_code,405)
+
+    def test_backup_round_trip_and_older_archive(self):
+        import tempfile,json,zipfile,hashlib
+        from pathlib import Path
+        from django.utils import timezone
+        from .models import WorkPreference,WorkDay,CompanyReview
+        from .backups import create_archive,restore_archive
+        WorkPreference.objects.create(user=self.user,daily_target=20)
+        WorkDay.objects.create(user=self.user,day=timezone.localdate(),target=20)
+        CompanyReview.objects.create(company=self.row,user=self.user,result='ready',note='Сохранить в копии')
+        with tempfile.TemporaryDirectory() as tmp,override_settings(BACKUP_DIR=Path(tmp)):
+            record=create_archive()
+            archive=Path(tmp)/record.filename
+            restore_archive(archive,self.user,replace=True)
+            self.assertEqual(WorkPreference.objects.get(user=self.user).daily_target,20)
+            self.assertEqual(CompanyReview.objects.get().note,'Сохранить в копии')
+            with zipfile.ZipFile(archive) as z:
+                manifest=json.loads(z.read('manifest.json'));data=json.loads(z.read('data.json'))
+            old=json.dumps([r for r in data if r['model'] not in ('crm.workpreference','crm.workday','crm.companyreview')],ensure_ascii=False).encode()
+            manifest['sha256']=hashlib.sha256(old).hexdigest()
+            manifest['migrations']=[m for m in manifest['migrations'] if not m.startswith('0015_')]
+            legacy=Path(tmp)/'legacy.zip'
+            with zipfile.ZipFile(legacy,'w') as z:z.writestr('manifest.json',json.dumps(manifest));z.writestr('data.json',old)
+            restore_archive(legacy,self.user,replace=True)
+            self.assertEqual(Company.objects.get().notes,'Важная заметка')
+            self.assertEqual(CompanyReview.objects.count(),0)
+            self.assertEqual(WorkPreference.objects.count(),0)

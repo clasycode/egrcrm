@@ -10,6 +10,7 @@ from .models import *
 from .forms import TaskForm,InteractionForm,ManualContactForm,ContactCheckForm,StatusForm
 from .business import status_choices,team
 from .normalization import normalized_contact
+from .reviewing import ReviewForm
 
 def log(company,actor,**changes): Audit.objects.create(company=company,actor=actor,changes=changes)
 
@@ -68,7 +69,7 @@ def company(request,pk):
         for key,value in entry.changes.items():
             parts.append(f'{labels.get(key,key)}: {value.get("before","")} → {value.get("after","")}' if isinstance(value,dict) else str(value))
         events.append({'at':entry.created_at,'actor':entry.actor,'text':'; '.join(parts)})
-    return render(request,'crm/detail.html',{'row':row,'statuses':status_choices()+([] if row.status in dict(status_choices()) else [(row.status,row.status)]),'team':team(),'task_form':task_form,'interaction_form':interaction_form,'manual_form':manual_form,'contacts':contacts,'common':common,'events':events,'recent_outreach':row.interactions.filter(kind__in=['call','message'],occurred_at__gte=timezone.now()-timedelta(days=1)).exists(),'last_outreach':row.interactions.filter(kind__in=['call','message']).aggregate(at=Max('occurred_at'))['at'],'snapshots':row.snapshots.all()[:30]})
+    return render(request,'crm/detail.html',{'row':row,'statuses':status_choices()+([] if row.status in dict(status_choices()) else [(row.status,row.status)]),'team':team(),'task_form':task_form,'interaction_form':interaction_form,'manual_form':manual_form,'contacts':contacts,'common':common,'events':events,'recent_outreach':row.interactions.filter(kind__in=['call','message'],occurred_at__gte=timezone.now()-timedelta(days=1)).exists(),'last_outreach':row.interactions.filter(kind__in=['call','message']).aggregate(at=Max('occurred_at'))['at'],'snapshots':row.snapshots.all()[:30],'review_form':ReviewForm(initial={'company':row.pk}),'own_review':row.reviews.filter(user=request.user).first()})
 
 @allowed
 def company_status(request,pk):

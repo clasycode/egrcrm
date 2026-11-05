@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.core.validators import MinValueValidator,MaxValueValidator
 from django.utils import timezone
 
 class Company(models.Model):
@@ -246,3 +247,24 @@ class WebsiteSearch(models.Model):
     evidence = models.TextField(blank=True)
     provider = models.CharField(max_length=50,blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+class WorkPreference(models.Model):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL,on_delete=models.CASCADE)
+    daily_target = models.PositiveSmallIntegerField(default=15,validators=[MinValueValidator(1),MaxValueValidator(200)])
+
+class WorkDay(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.CASCADE)
+    day = models.DateField()
+    target = models.PositiveSmallIntegerField(default=15,validators=[MinValueValidator(1),MaxValueValidator(200)])
+    class Meta:
+        constraints=[models.UniqueConstraint(fields=['user','day'],name='unique_user_work_day')]
+
+class CompanyReview(models.Model):
+    RESULTS=[('ready','Готова к обращению'),('follow_up','Вернуться позже'),('not_fit','Не подходит'),('other','Другой результат')]
+    company = models.ForeignKey(Company,on_delete=models.CASCADE,related_name='reviews')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.CASCADE)
+    result = models.CharField(max_length=20,choices=RESULTS)
+    note = models.TextField()
+    completed_at = models.DateTimeField(default=timezone.now,db_index=True)
+    class Meta:
+        constraints=[models.UniqueConstraint(fields=['user','company'],name='unique_user_company_review')]

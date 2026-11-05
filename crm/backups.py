@@ -10,7 +10,7 @@ from django.utils import timezone
 
 FORMAT=1
 # Explicit topological order, independent of model declaration order.
-MODELS=['CRMStatus','Company','Contact','Audit','ImportDay','Candidate','Receipt','CollectorSettings','Activity','CollectionReset','Task','Interaction','ContactCheck','SourceSnapshot','SavedSelection','CollectionJob','CollectionRun','RunDay','RunCompany','JobAttempt','WebsiteSearch']
+MODELS=['CRMStatus','Company','Contact','Audit','ImportDay','Candidate','Receipt','CollectorSettings','Activity','CollectionReset','Task','Interaction','ContactCheck','SourceSnapshot','SavedSelection','CollectionJob','CollectionRun','RunDay','RunCompany','JobAttempt','WebsiteSearch','WorkPreference','WorkDay','CompanyReview']
 LIMIT=500*1024*1024
 
 def create_archive(reason='manual'):

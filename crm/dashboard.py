@@ -7,6 +7,7 @@ from django.db.models.functions import TruncDate
 from django.utils import timezone
 from .models import Company, Interaction, Task, Activity, Candidate
 from .business import DEFAULT_STATUSES
+from .reviewing import report
 from .templatetags.ui import STAGES
 
 
@@ -34,7 +35,7 @@ def bars(items,denominator=None):
     return items
 
 
-def dashboard_context(params):
+def dashboard_context(params,user=None):
     today=timezone.localdate()
     days=int(params.get('days','30')) if params.get('days') in ('7','30','90') else 30
     data={'start':(today-timedelta(days=days-1)).isoformat(),'end':today.isoformat()}
@@ -109,6 +110,7 @@ def dashboard_context(params):
         item['added_height']=round(100*item['added']/peak,2) if peak else 0
         item['outgoing_height']=round(100*item['outgoing']/peak,2) if peak else 0
     return {
+        'processing':report(user,start,end) if user and valid else None,
         'period_form':form,'period_valid':valid,'period_start':start,'period_end':end,'period_days':(end-start).days+1,
         'quick_periods':[{'days':n,'active':valid and start==today-timedelta(days=n-1) and end==today} for n in (7,30,90)],
         'total':total,'new':new,'overdue':overdue,'current_clients':current_clients,'blocked':blocked,

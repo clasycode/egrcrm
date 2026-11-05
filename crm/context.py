@@ -13,7 +13,7 @@ def ui_context(request):
     elif path.startswith('/companies/') or path.startswith('/contacts/'):
         section,title='companies','Карточка компании'
     else:
-        names={'tasks':'Задачи','selections':'Подборки','candidates':'Ожидают контактов','imports':'Сбор данных','runs':'Запуски сбора','backups':'Резервные копии','settings':'Настройки','statistics':'Статистика','diagnostics':'Диагностика','jobs':'Результат запроса','design-system':'Дизайн-система'}
+        names={'work':'Моя обработка','tasks':'Задачи','selections':'Подборки','candidates':'Ожидают контактов','imports':'Сбор данных','runs':'Запуски сбора','backups':'Резервные копии','settings':'Настройки','statistics':'Статистика','diagnostics':'Диагностика','jobs':'Результат запроса','design-system':'Дизайн-система'}
         segment=path.strip('/').split('/')[0]
         section,title=segment,names.get(segment,'Рабочее пространство')
         if section=='jobs': section='imports'
