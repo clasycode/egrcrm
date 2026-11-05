@@ -8,7 +8,7 @@ from .business import status_choices,team,PHONE_RESULTS
 
 def company_query(request):
     from datetime import date
-    rows = Company.objects.filter(admitted_at__isnull=False).prefetch_related('contacts','activities')
+    rows = Company.objects.filter(admitted_at__isnull=False).select_related('owner').prefetch_related('contacts','activities')
     q = request.GET.get('q','').strip()
     from .normalization import search_contact
     if q: rows = rows.filter(Q(unp__icontains=q)|Q(search_name__contains=q.casefold())|Q(contacts__raw__icontains=q)|Q(contacts__normalized__contains=search_contact(q))).distinct()
@@ -76,7 +76,8 @@ def companies(request):
     params.pop('page',None)
     from .forms import ActivityFilterForm
     from .progress import collection_progress
-    return render(request,'crm/list.html',{'phone_results':PHONE_RESULTS,'activity_options':__import__('crm.models',fromlist=['Activity']).Activity.objects.filter(current=True).values('code','name').distinct().order_by('code')[:1000],'team':team(),'regions':Company.objects.exclude(region='').values_list('region',flat=True).distinct(),'states':Company.objects.exclude(egr_state='').values_list('egr_state',flat=True).distinct(),'progress':collection_progress(),'activity_form':ActivityFilterForm(request.GET),'rows':rows,'q':request.GET.get('q',''),'statuses':status_choices(),'query':params.urlencode()})
+    from .presentation import list_context
+    return render(request,'crm/list.html',{**list_context(request),'phone_results':PHONE_RESULTS,'activity_options':__import__('crm.models',fromlist=['Activity']).Activity.objects.filter(current=True).values('code','name').distinct().order_by('code')[:1000],'team':team(),'regions':Company.objects.exclude(region='').values_list('region',flat=True).distinct(),'states':Company.objects.exclude(egr_state='').values_list('egr_state',flat=True).distinct(),'progress':collection_progress(),'activity_form':ActivityFilterForm(request.GET),'rows':rows,'q':request.GET.get('q',''),'statuses':status_choices(),'query':params.urlencode()})
 
 @allowed
 def companies_export(request):

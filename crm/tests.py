@@ -570,3 +570,55 @@ class ResetCollectionTests(TestCase):
             raise SourceCancelled('Пауза')
         with patch('crm.jobs.enrich',side_effect=pause): self.assertFalse(run_one())
         job.refresh_from_db();self.assertEqual(job.state,'pending')
+
+@override_settings(SECURE_SSL_REDIRECT=False,SESSION_COOKIE_SECURE=False)
+class DesignSystemTests(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.user=get_user_model().objects.create_superuser('ui-owner','ui@example.test','test-password')
+        self.client.force_login(self.user)
+
+    def test_unknown_status_is_escaped_and_identity_is_stable(self):
+        from django.template import Template,Context
+        from .templatetags.ui import company_identity
+        row=Company(name='ООО «Клён Дизайн»',country='BY',unp='900000123')
+        identity=company_identity(row)
+        self.assertEqual(identity['initials'],'КД')
+        row.name='ООО «Новое имя»'
+        self.assertEqual(identity['tone'],company_identity(row)['tone'])
+        html=Template('{% load ui %}{% stage_badge status %}').render(Context({'status':'<script>alert(1)</script>'}))
+        self.assertIn('status--custom',html)
+        self.assertNotIn('<script>',html)
+        self.assertIn('&lt;script&gt;',html)
+
+    def test_filters_keep_scope_and_remove_pagination(self):
+        from django.test import RequestFactory
+        from .templatetags.ui import query_update
+        request=RequestFactory().get('/?q=design&oked=62010&page=3')
+        url=query_update({'request':request},status='Клиент')
+        from urllib.parse import parse_qs
+        query=parse_qs(url[1:])
+        self.assertEqual(query['oked'],['62010'])
+        self.assertEqual(query['q'],['design'])
+        self.assertEqual(query['status'],['Клиент'])
+        self.assertNotIn('page',query)
+
+    def test_authenticated_screens_and_separate_login_layout(self):
+        for path in ['/', '/tasks/', '/imports/', '/imports/?tab=progress', '/imports/?tab=schedule', '/backups/']:
+            response=self.client.get(path)
+            self.assertEqual(response.status_code,200,path)
+            self.assertContains(response,'design-system.css')
+            self.assertContains(response,'workspace-navigation')
+        response=self.client.get('/login/')
+        self.assertContains(response,'Вход в закрытую CRM')
+        self.assertNotContains(response,'id="workspace-navigation"')
+
+    def test_detail_forms_have_unique_field_ids(self):
+        row=enrich(Fake(),'123')
+        response=self.client.get(f'/companies/{row.pk}/')
+        import re
+        ids=re.findall(r'\bid="([^"]+)"',response.content.decode())
+        self.assertEqual(len(ids),len(set(ids)))
+        self.assertContains(response,'manual_')
+        self.assertContains(response,'interaction_')

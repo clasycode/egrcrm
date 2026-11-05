@@ -16,7 +16,7 @@ def log(company,actor,**changes): Audit.objects.create(company=company,actor=act
 @allowed
 def company(request,pk):
     row=get_object_or_404(Company,pk=pk)
-    task_form=TaskForm();interaction_form=InteractionForm(initial={'occurred_at':timezone.localtime()},company=row);manual_form=ManualContactForm()
+    task_form=TaskForm(auto_id='task_%s');interaction_form=InteractionForm(initial={'occurred_at':timezone.localtime()},company=row,auto_id='interaction_%s');manual_form=ManualContactForm(auto_id='manual_%s')
     if request.method=='POST':
         action=request.POST.get('action','save')
         if action=='save':
@@ -32,12 +32,12 @@ def company(request,pk):
                 row.save(update_fields=list(changes));log(row,request.user,**changes)
             return redirect(request.path)
         if action=='task':
-            task_form=TaskForm(request.POST)
+            task_form=TaskForm(request.POST,auto_id='task_%s')
             if task_form.is_valid():
                 task=task_form.save(commit=False);task.company=row;task.created_by=request.user;task.owner=task.owner or request.user;task.save()
                 log(row,request.user,task=f'Создана задача «{task.title}»');return redirect(request.path)
         if action=='interaction':
-            interaction_form=InteractionForm(request.POST,company=row)
+            interaction_form=InteractionForm(request.POST,company=row,auto_id='interaction_%s')
             if row.do_not_contact and request.POST.get('kind') in ('call','message'):
                 messages.error(request,'У компании запрет обращений. Сначала проверьте основание запрета. Запись не сохранена.')
             elif interaction_form.is_valid():
@@ -47,7 +47,7 @@ def company(request,pk):
                 event=interaction_form.save(commit=False);event.company=row;event.actor=request.user;event.save()
                 log(row,request.user,interaction=f'{event.get_kind_display()}: {event.get_result_display()} — {event.note}');return redirect(request.path)
         if action=='manual':
-            manual_form=ManualContactForm(request.POST)
+            manual_form=ManualContactForm(request.POST,auto_id='manual_%s')
             if manual_form.is_valid():
                 data=manual_form.cleaned_data
                 contact,_=Contact.objects.get_or_create(company=row,kind=data['kind'],raw=data['raw'],source='Вручную',defaults={'current':True,'normalized':normalized_contact(data['kind'],data['raw']),'original_line':data['raw'],'comment':data['comment']})

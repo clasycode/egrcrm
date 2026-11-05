@@ -10,7 +10,7 @@
         if (!response.ok || response.redirected) throw new Error();
         const doc=new DOMParser().parseFromString(await response.text(),'text/html');
         const table=doc.getElementById('company-table');
-        if (table) document.getElementById('company-table').replaceWith(table);
+        if (table) {document.getElementById('company-table').replaceWith(table);document.dispatchEvent(new Event('crm:table-updated'));}
         note.textContent='Таблица обновлена без сброса фильтров и прокрутки.';
       }
     } catch (_) { document.getElementById('list-update-note').textContent='Автообновление недоступно. Проверьте соединение или обновите страницу.'; }
