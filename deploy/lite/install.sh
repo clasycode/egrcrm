@@ -58,7 +58,7 @@ else
     [[ $(getent passwd egrcrm | cut -d: -f6) == /var/lib/egrcrm ]] || fail 'An unrelated egrcrm user already exists.'
 fi
 install -d -m 0750 -o egrcrm -g egrcrm /var/lib/egrcrm /var/lib/egrcrm/backups
-install -d -m 0755 /opt/egrcrm/releases /var/www/egrcrm-acme
+install -d -m 0755 /opt/egrcrm /opt/egrcrm/releases /var/www/egrcrm-acme
 install -d -m 0700 /etc/egrcrm
 if [[ -e /etc/egrcrm/egrcrm.env ]]; then
     grep -Fxq "ALLOWED_HOSTS=$server_ip,localhost,127.0.0.1" /etc/egrcrm/egrcrm.env || fail 'Existing deployment uses a different IP; configuration was not overwritten.'
@@ -109,6 +109,8 @@ set +a
 chown -R egrcrm:egrcrm /var/lib/egrcrm
 chmod -R a+rX "$release"
 ln -sfn "$release" /opt/egrcrm/current
+# Validate the same identity and working directory used by systemd before TLS setup.
+runuser -u egrcrm -- sh -c 'cd /opt/egrcrm/current && .venv/bin/gunicorn config.wsgi:application --workers 1 --threads 2 --check-config'
 cat > /usr/local/sbin/egrcrm-manage <<'EOF'
 #!/bin/sh
 set -eu
