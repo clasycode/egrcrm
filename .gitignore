@@ -8,3 +8,5 @@ staticfiles/
 backups/
 
 data/
+
+server-diagnostic-*.txt

@@ -1,4 +1,4 @@
-param([string]$ServerIp, [string]$KeyPath, [int]$Port = 22)
+param([string]$ServerIp, [string]$KeyPath, [int]$Port = 22, [switch]$Diagnose)
 $ErrorActionPreference = 'Stop'
 function Invoke-Checked([string]$Program, [string[]]$Arguments) {
     & $Program @Arguments
@@ -30,12 +30,23 @@ try {
     Invoke-Checked 'icacls.exe' @($temporary,'/inheritance:r','/grant:r',"${identity}:(OI)(CI)F")
     $privateKey = Join-Path $temporary 'server_key'
     Invoke-Checked 'py.exe' @('-3.12',(Join-Path $PSScriptRoot 'key_to_openssh.py'),$KeyPath,$privateKey)
-    $archive = Join-Path $temporary 'release.tar.gz'
-    $digest = & py.exe -3.12 (Join-Path $PSScriptRoot 'make_release.py') $archive --root $projectRoot
-    if ($LASTEXITCODE -ne 0 -or $digest -notmatch '^[a-f0-9]{64}$') { throw 'Could not package the release.' }
     $remote = "root@$ServerIp"
     $sshArgs = @('-i',$privateKey,'-p',"$Port",'-o','BatchMode=yes','-o','StrictHostKeyChecking=accept-new','-o','ConnectTimeout=15','-o','ServerAliveInterval=30','-o','ServerAliveCountMax=4')
     $scpArgs = @('-i',$privateKey,'-P',"$Port",'-o','BatchMode=yes','-o','StrictHostKeyChecking=accept-new','-o','ConnectTimeout=15','-o','ServerAliveInterval=30','-o','ServerAliveCountMax=4')
+    if ($Diagnose) {
+        $remoteScript = '/root/egrcrm-diagnostic-' + [guid]::NewGuid().ToString('N') + '.sh'
+        $report = Join-Path $projectRoot ('server-diagnostic-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.txt')
+        Invoke-Checked 'scp.exe' ($scpArgs + @((Join-Path $PSScriptRoot 'lite\diagnose.sh'),"${remote}:$remoteScript"))
+        & ssh.exe @sshArgs $remote "trap 'rm -f $remoteScript' EXIT; bash $remoteScript 2>&1" | Tee-Object -Variable diagnosticLines
+        $diagnosticExit = $LASTEXITCODE
+        $diagnosticLines | Out-File -LiteralPath $report -Encoding utf8
+        if ($diagnosticExit -ne 0) { throw 'Could not collect server diagnostics.' }
+        Write-Host "Diagnostic report saved: $report"
+        return
+    }
+    $archive = Join-Path $temporary 'release.tar.gz'
+    $digest = & py.exe -3.12 (Join-Path $PSScriptRoot 'make_release.py') $archive --root $projectRoot
+    if ($LASTEXITCODE -ne 0 -or $digest -notmatch '^[a-f0-9]{64}$') { throw 'Could not package the release.' }
     Write-Host 'Checking the server and authenticated SSH access...'
     Invoke-Checked 'ssh.exe' ($sshArgs + @($remote,'uname -s; free -m; df -h /'))
     $upload = '/root/egrcrm-upload-' + [guid]::NewGuid().ToString('N')

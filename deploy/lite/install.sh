@@ -167,4 +167,6 @@ for attempt in $(seq 1 20); do
     fi
     sleep 2
 done
-fail 'Services were installed but the HTTPS health check failed. Inspect journalctl -u egrcrm-web -n 60.'
+echo 'HTTPS health check failed. Collecting the actual service error:' >&2
+bash "$release/deploy/lite/diagnose.sh" || true
+fail 'Services were installed but the HTTPS health check failed. The service diagnostics are printed above.'
