@@ -1,0 +1,25 @@
+[Unit]
+Description=EGR CRM web (one worker for a 1 GB VPS)
+After=network.target
+
+[Service]
+Type=simple
+User=egrcrm
+Group=egrcrm
+WorkingDirectory=/opt/egrcrm/current
+EnvironmentFile=/etc/egrcrm/egrcrm.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/egrcrm/current/.venv/bin/gunicorn config.wsgi:application --bind 127.0.0.1:8000 --workers 1 --threads 2 --timeout 120 --max-requests 1000 --max-requests-jitter 100
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/egrcrm
+MemoryAccounting=true
+
+[Install]
+WantedBy=multi-user.target

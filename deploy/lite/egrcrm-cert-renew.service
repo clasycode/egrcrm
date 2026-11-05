@@ -1,0 +1,8 @@
+[Unit]
+Description=Renew EGR CRM short-lived IP certificate
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/egrcrm-certbot/bin/certbot renew --quiet --deploy-hook /usr/local/sbin/egrcrm-reload-nginx
