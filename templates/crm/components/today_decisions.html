@@ -1,0 +1,1 @@
+{% for review in today_reviews %}<div class="refusal-reason"><a href="/companies/{{ review.company_id }}/">{{ review.company.name|default:review.company.unp }}</a><span class="status">{{ review.get_result_display }}</span><p>{{ review.note }}</p></div>{% empty %}<p class="muted small">Измените статус нового лида — он появится здесь.</p>{% endfor %}

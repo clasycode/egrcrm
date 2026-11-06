@@ -2,7 +2,7 @@
   if (!document.getElementById('company-table')) return;
   function editing() {
     const table=document.getElementById('company-table');
-    return document.querySelector('input[name="selected"]:checked, dialog[open], [data-inline-status][data-saving], [data-copy-company][aria-busy="true"]') || table?.contains(document.activeElement);
+    return document.querySelector('input[name="selected"]:checked, dialog[open], [data-inline-status][data-saving], [data-lead-form][aria-busy="true"], [data-copy-company][aria-busy="true"]') || table?.contains(document.activeElement);
   }
   async function tick() {
     const note=document.getElementById('list-update-note');

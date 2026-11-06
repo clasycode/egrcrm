@@ -12,10 +12,12 @@ def company_query(request):
     q = request.GET.get('q','').strip()
     from .normalization import search_contact
     if q: rows = rows.filter(Q(unp__icontains=q)|Q(search_name__contains=q.casefold())|Q(contacts__raw__icontains=q)|Q(contacts__normalized__contains=search_contact(q))).distinct()
-    if request.GET.get('new'): rows = rows.filter(viewed_at__isnull=True)
+    if request.GET.get('new'): rows = rows.filter(status='Новая')
+    if request.GET.get('unviewed')=='1':rows=rows.filter(viewed_at__isnull=True)
     if request.GET.get('unprocessed')=='1': rows=rows.exclude(reviews__user=request.user)
     if request.GET.get('kind') in ('1','2'): rows=rows.filter(kind=int(request.GET['kind']))
     if request.GET.get('status'): rows=rows.filter(status=request.GET['status'])
+    if request.GET.get('reply') in ('waiting','answered','no_reply'):rows=rows.filter(status='В работе',reply_state=request.GET['reply'])
     if request.GET.get('allowed')=='1' or request.GET.get('outreach')=='1':
         rows=rows.filter(do_not_contact=False).exclude(contacts__do_not_contact=True)
     for key in ['region','city','district','egr_state']:

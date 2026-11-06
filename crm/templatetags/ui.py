@@ -4,7 +4,8 @@ from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 register=template.Library()
 ICONS={
-'telegram':'<path d="m21 4-4 16-6-5-4 3 1-6 10-6-8 8-6-2Z"/>',
+'refresh':'<path d="M20 7v5h-5M4 17v-5h5M5 8a8 8 0 0 1 13-3l2 2M4 17l2 2a8 8 0 0 0 13-3"/>',
+ 'telegram':'<path d="m21 4-4 16-6-5-4 3 1-6 10-6-8 8-6-2Z"/>',
 'viber':'<path d="M20 11c0 5-3 8-8 8H9l-4 3v-5c-2-2-3-4-3-7 0-5 3-8 9-8s9 3 9 9Z"/><path d="m7 7 2 2-1 2a9 9 0 0 0 4 4l2-1 2 2M13 6a5 5 0 0 1 4 4M13 9a2 2 0 0 1 1 1"/>',
 'browser':'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18Z"/>',
 

@@ -1,4 +1,4 @@
-"""Explicit personal processing, separate from opening a card or contacting it."""
+"""Daily first decisions; subsequent replies do not inflate the primary plan."""
 from datetime import timedelta
 from django import forms
 from django.db.models import Count
@@ -21,7 +21,7 @@ def summary(user,day=None):
     target=workday.target if workday else preference.daily_target if preference else 15
     own=CompanyReview.objects.filter(user=user,company__admitted_at__isnull=False)
     done=own.filter(completed_at__date=today).count()
-    return {'target':target,'done':done,'remaining':max(0,target-done),'percent':min(100,round(100*done/target)),'queue':Company.objects.filter(admitted_at__isnull=False).exclude(pk__in=own.values('company_id')).count()}
+    return {'target':target,'done':done,'remaining':max(0,target-done),'percent':min(100,round(100*done/target)),'queue':Company.objects.filter(admitted_at__isnull=False,status='Новая').exclude(pk__in=own.values('company_id')).count()}
 
 
 def report(user,start,end):

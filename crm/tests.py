@@ -67,7 +67,7 @@ class WorkflowTests(TestCase):
         self.client.post(f'/companies/{row.pk}/',{'notes':'заметка','status':'Клиент','do_not_contact':'on'})
         row.refresh_from_db()
         self.assertEqual(row.status,'Клиент'); self.assertTrue(row.do_not_contact)
-        self.assertEqual(row.audit.count(),1)
+        self.assertEqual(row.audit.count(),2) # Shared status transition and separate card edits.
         self.assertEqual(self.client.get('/').status_code,200)
         self.assertEqual(self.client.get('/imports/').status_code,200)
     def test_worker_initializes_calendar_days(self):
@@ -668,6 +668,7 @@ class InlineStatusTests(TestCase):
         self.row.refresh_from_db();self.assertEqual(self.row.status,'Новая')
 
     def test_non_ajax_fallback_and_safe_redirect(self):
+        self.row.do_not_contact=False;self.row.save(update_fields=['do_not_contact'])
         response=self.client.post(self.url,{'status':'В работе','previous_status':'Новая','next':'https://outside.example/'})
         self.assertRedirects(response,'/',fetch_redirect_response=False)
         self.row.refresh_from_db();self.assertEqual(self.row.status,'В работе')

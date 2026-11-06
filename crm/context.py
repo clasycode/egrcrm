@@ -24,7 +24,7 @@ def ui_context(request):
     from django.core.cache import cache
     counts=cache.get('crm-nav-counts-v31')
     if counts is None:
-        counts=Company.objects.filter(admitted_at__isnull=False).aggregate(total=Count('pk'),new=Count('pk',filter=Q(viewed_at__isnull=True)),clients=Count('pk',filter=Q(status='Клиент')))
+        counts=Company.objects.filter(admitted_at__isnull=False).aggregate(total=Count('pk'),new=Count('pk',filter=Q(status='Новая')),clients=Count('pk',filter=Q(status='Клиент')))
         counts.update(Task.objects.filter(completed_at__isnull=True).aggregate(today=Count('pk',filter=Q(due_at__date=timezone.localdate())),overdue=Count('pk',filter=Q(due_at__lt=timezone.now()))))
         cache.set('crm-nav-counts-v31',counts,5)
     result['ui_counts']=counts

@@ -1,0 +1,13 @@
+{% load ui %}<div class="lead-actions" data-lead-actions>
+{% if row.status == 'В работе' %}<span class="reply-label reply-label--{{ row.reply_state|default:'unknown' }}">{% if row.reply_state == 'answered' %}{% ui_icon 'check' %}{% else %}{% ui_icon 'clock' %}{% endif %}{{ row.get_reply_state_display }}</span>{% endif %}
+<form method="post" action="/companies/{{ row.pk }}/lead-action/" data-lead-form>{% csrf_token %}<input type="hidden" name="previous_status" value="{{ row.status }}"><input type="hidden" name="previous_reply" value="{{ row.reply_state }}"><input type="hidden" name="next" value="{{ request.POST.next|default:request.get_full_path }}">
+{% if row.status == 'Новая' %}<button name="action" value="start" class="lead-start button--small" title="Первое сообщение уже отправлено — взять компанию в работу" {% if row.do_not_contact %}disabled data-contact-blocked{% endif %}>{% ui_icon 'work' %}В работу</button>{% endif %}
+{% if row.status == 'В работе' %}
+{% if row.reply_state != 'answered' %}<button name="action" value="answered" class="button--secondary button--small">{% ui_icon 'check' %}Ответил</button>{% endif %}
+{% if row.reply_state != 'no_reply' %}<button name="action" value="no_reply" class="button--ghost button--small">{% ui_icon 'clock' %}Не ответил</button>{% endif %}
+{% if row.reply_state == 'answered' %}<button name="action" value="negotiation" class="button--secondary button--small">Переговоры</button><button name="action" value="client" class="button--secondary button--small">Клиент</button>{% endif %}
+<button name="action" value="refusal" class="button--ghost button--small">Отказ</button>
+{% endif %}
+{% if row.status == 'Переговоры' %}<button name="action" value="client" class="button--secondary button--small">Клиент</button><button name="action" value="refusal" class="button--ghost button--small">Отказ</button>{% endif %}
+{% if row.status == 'Новая' or row.status == 'В работе' or row.status == 'Переговоры' %}<button name="action" value="not_fit" class="lead-dismiss button--ghost button--small">{% ui_icon 'close' %}Не подходит</button>{% endif %}
+</form><span class="lead-feedback small" role="status" aria-live="polite"></span></div>

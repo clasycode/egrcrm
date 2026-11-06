@@ -11,6 +11,8 @@ from .forms import TaskForm,InteractionForm,ManualContactForm,ContactCheckForm,S
 from .business import status_choices,team
 from .normalization import normalized_contact
 from .reviewing import ReviewForm
+from .lead_actions import change_status,mark_reply
+from django.core.exceptions import ValidationError
 
 def log(company,actor,**changes): Audit.objects.create(company=company,actor=actor,changes=changes)
 
@@ -21,9 +23,13 @@ def company(request,pk):
     if request.method=='POST':
         action=request.POST.get('action','save')
         if action=='save':
+            status=request.POST.get('status',row.status)
+            if status in dict(status_choices()):
+                try:change_status(row,request.user,status)
+                except ValidationError as exc:
+                    messages.error(request,' '.join(exc.messages));return redirect(request.path)
             changes={}
-            for key,value in [('notes',request.POST.get('notes','')),('status',request.POST.get('status',row.status)),('do_not_contact',request.POST.get('do_not_contact')=='on')]:
-                if key=='status' and value not in dict(status_choices()): continue
+            for key,value in [('notes',request.POST.get('notes','')),('do_not_contact',request.POST.get('do_not_contact')=='on')]:
                 if getattr(row,key)!=value: changes[key]={'before':getattr(row,key),'after':value};setattr(row,key,value)
             owner=request.POST.get('owner')
             if owner is not None:
@@ -46,6 +52,8 @@ def company(request,pk):
                 if contact and contact.do_not_contact and interaction_form.cleaned_data['kind'] in ('call','message'):
                     messages.error(request,'Для контакта установлен запрет обращений');return redirect(request.path)
                 event=interaction_form.save(commit=False);event.company=row;event.actor=request.user;event.save()
+                if row.status=='В работе' and (event.kind=='reply' or event.result=='answered'):
+                    mark_reply(row,request.user,'answered',record_event=False)
                 log(row,request.user,interaction=f'{event.get_kind_display()}: {event.get_result_display()} — {event.note}');return redirect(request.path)
         if action=='manual':
             manual_form=ManualContactForm(request.POST,auto_id='manual_%s')
@@ -63,10 +71,13 @@ def company(request,pk):
     contacts=row.contacts.all()
     common=set(Contact.objects.exclude(company=row).filter(normalized__in=contacts.exclude(normalized='').values('normalized')).values_list('normalized',flat=True))
     events=[]
-    labels={'notes':'Заметки','status':'Статус','do_not_contact':'Запрет обращения','owner':'Ответственный'}
+    labels={'notes':'Заметки','status':'Статус','do_not_contact':'Запрет обращения','owner':'Ответственный','reply_state':'Ответ на первое сообщение'}
     for entry in row.audit.select_related('actor').order_by('-created_at')[:100]:
         parts=[]
         for key,value in entry.changes.items():
+            if key=='reply_state' and isinstance(value,dict):
+                choices=dict(Company._meta.get_field('reply_state').choices)
+                value={k:choices.get(v,v) for k,v in value.items()}
             parts.append(f'{labels.get(key,key)}: {value.get("before","")} → {value.get("after","")}' if isinstance(value,dict) else str(value))
         events.append({'at':entry.created_at,'actor':entry.actor,'text':'; '.join(parts)})
     return render(request,'crm/detail.html',{'row':row,'statuses':status_choices()+([] if row.status in dict(status_choices()) else [(row.status,row.status)]),'team':team(),'task_form':task_form,'interaction_form':interaction_form,'manual_form':manual_form,'contacts':contacts,'common':common,'events':events,'recent_outreach':row.interactions.filter(kind__in=['call','message'],occurred_at__gte=timezone.now()-timedelta(days=1)).exists(),'last_outreach':row.interactions.filter(kind__in=['call','message']).aggregate(at=Max('occurred_at'))['at'],'snapshots':row.snapshots.all()[:30],'review_form':ReviewForm(initial={'company':row.pk}),'own_review':row.reviews.filter(user=request.user).first()})
@@ -74,7 +85,6 @@ def company(request,pk):
 @allowed
 def company_status(request,pk):
     """Update only the CRM stage; never overwrite card notes or contact bans."""
-    from django.core.cache import cache
     from django.utils.http import url_has_allowed_host_and_scheme
     from django.template.loader import render_to_string
     if request.method != 'POST':
@@ -93,16 +103,18 @@ def company_status(request,pk):
         if wants_json: return JsonResponse({'error':error},status=code)
         messages.error(request,error)
     else:
-        before=row.status
-        if before != status:
-            row.status=status
-            row.save(update_fields=['status'])
-            log(row,request.user,status={'before':before,'after':status})
-            cache.delete('crm-nav-counts-v31')
-        if wants_json:
-            from .templatetags.ui import stage_badge
-            return JsonResponse({'status':row.status,'badge':render_to_string('crm/components/status.html',stage_badge(row.status)),'clients':Company.objects.filter(admitted_at__isnull=False,status='Клиент').count()})
-        messages.success(request,f'Статус компании изменён: {row.status}')
+        try:
+            counted=change_status(row,request.user,status)
+        except ValidationError as exc:
+            if wants_json:return JsonResponse({'error':' '.join(exc.messages)},status=400)
+            messages.error(request,' '.join(exc.messages))
+        else:
+            if wants_json:
+                from .templatetags.ui import stage_badge
+                from .reviewing import summary
+                from .work_views import live_metrics
+                return JsonResponse({'status':row.status,'badge':render_to_string('crm/components/status.html',stage_badge(row.status)),'clients':Company.objects.filter(admitted_at__isnull=False,status='Клиент').count(),**live_metrics(request.user),'counted':counted,'work':summary(request.user),'actions':render_to_string('crm/components/lead_actions.html',{'row':row},request=request)})
+            messages.success(request,f'Статус компании изменён: {row.status}')
     target=request.POST.get('next','/')
     if not url_has_allowed_host_and_scheme(target,allowed_hosts={request.get_host()},require_https=request.is_secure()): target='/'
     return redirect(target)
@@ -188,7 +200,9 @@ def bulk(request):
     count=0
     for row in rows.iterator(chunk_size=100):
         if action=='status' and request.POST.get('status') in dict(status_choices()):
-            before=row.status;row.status=request.POST['status'];row.save(update_fields=['status']);log(row,request.user,status={'before':before,'after':row.status})
+            try:change_status(row,request.user,request.POST['status'])
+            except ValidationError as exc:
+                messages.error(request,f'{row.unp}: '+ ' '.join(exc.messages));continue
         elif action=='owner':
             before=row.owner_id;row.owner=owner;row.save(update_fields=['owner']);log(row,request.user,owner={'before':before,'after':row.owner_id})
         elif action=='task':

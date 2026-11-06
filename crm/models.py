@@ -24,6 +24,7 @@ class Company(models.Model):
     source_change_seen_at = models.DateTimeField(null=True,blank=True)
     activity_checked_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=32, default='Новая')
+    reply_state = models.CharField(max_length=16,blank=True,default='',choices=[('', 'Ответ не отмечен'),('waiting','Ждём ответа'),('answered','Ответил'),('no_reply','Не ответил')],db_index=True)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL,null=True,blank=True,on_delete=models.SET_NULL)
     do_not_contact = models.BooleanField(default=False)
     notes = models.TextField(blank=True)
@@ -264,7 +265,7 @@ class WorkDay(models.Model):
         constraints=[models.UniqueConstraint(fields=['user','day'],name='unique_user_work_day')]
 
 class CompanyReview(models.Model):
-    RESULTS=[('ready','Готова к обращению'),('follow_up','Вернуться позже'),('not_fit','Не подходит'),('other','Другой результат')]
+    RESULTS=[('in_work','Взята в работу'),('negotiation','Переговоры'),('client','Клиент'),('refusal','Отказ'),('changed','Статус изменён'),('ready','Готова к обращению'),('follow_up','Вернуться позже'),('not_fit','Не подходит'),('other','Другой результат')]
     company = models.ForeignKey(Company,on_delete=models.CASCADE,related_name='reviews')
     user = models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.CASCADE)
     result = models.CharField(max_length=20,choices=RESULTS)

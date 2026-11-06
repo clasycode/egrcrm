@@ -1,7 +1,7 @@
 (() => {
   document.documentElement.classList.add('js-inline-status');
   async function save(form) {
-    if (form.dataset.saving) return;
+    if (form.dataset.saving||form.closest('tr')?.dataset.leadSaving) return;
     const select=form.elements.status, previous=form.elements.previous_status;
     const feedback=form.querySelector('[role="status"]');
     if (select.value===previous.value) return;
@@ -21,7 +21,11 @@
       document.querySelectorAll('[data-client-count]').forEach(node=>node.textContent=result.clients);
       form.querySelector('[data-status-badge]').innerHTML=result.badge;
       form.closest('tr').classList.toggle('is-client',result.status==='Клиент');
-      feedback.textContent='Сохранено';
+      const card=form.closest('tr');
+      const actions=card.querySelector('[data-lead-actions]');
+      if(actions&&result.actions)actions.outerHTML=result.actions;
+      document.dispatchEvent(new CustomEvent('crm:lead-saved',{detail:result}));
+      feedback.textContent=result.counted?'Сохранено · +1 к плану':'Сохранено';
     } catch (error) {
       select.value=previous.value;
       feedback.textContent=error instanceof TypeError?'Нет соединения. Обновите страницу и проверьте результат.':error.message||'Не удалось сохранить статус.';
