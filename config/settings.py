@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
-APP_VERSION = '3.7.0'
+APP_VERSION = '3.7.1'
 LOCAL_MODE = os.environ.get('CRM_LOCAL_MODE') == '1'
 DATA_DIR = Path(os.environ.get('CRM_DATA_DIR',str(BASE_DIR))).resolve()
 BACKUP_DIR = DATA_DIR/'backups'

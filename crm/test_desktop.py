@@ -100,3 +100,45 @@ class DesktopProcessTests(TestCase):
             base['CRM_LOCAL_MODE']=local
             result=subprocess.run([sys.executable,'-c',script],env=base,text=True,capture_output=True,check=True)
             self.assertEqual(result.stdout.strip(),expected)
+
+class SQLiteHandleTests(TestCase):
+    def test_backup_closes_both_handles_before_rename(self):
+        from contextlib import closing
+        from desktop_app.storage import sqlite_copy
+        connections=[];connect=sqlite3.connect;replace=Path.replace
+        def tracked(*args,**kwargs):
+            connection=connect(*args,**kwargs);connections.append(connection);return connection
+        def checked_replace(path,target):
+            self.assertEqual(len(connections),2)
+            for connection in connections:
+                with self.assertRaises(sqlite3.ProgrammingError):connection.execute('SELECT 1')
+            return replace(path,target)
+        with tempfile.TemporaryDirectory() as directory:
+            source=Path(directory)/'source.sqlite3';target=Path(directory)/'copy.sqlite3'
+            with closing(connect(source)) as connection:
+                connection.execute('CREATE TABLE clients (name TEXT)');connection.execute("INSERT INTO clients VALUES ('saved')");connection.commit()
+            with patch('desktop_app.storage.sqlite3.connect',side_effect=tracked),patch.object(Path,'replace',checked_replace):
+                sqlite_copy(source,target)
+            with closing(connect(target)) as connection:self.assertEqual(connection.execute('SELECT name FROM clients').fetchone()[0],'saved')
+            self.assertEqual(list(Path(directory).glob('.copy-*')),[])
+    def test_backup_failure_closes_handles_before_cleanup_and_keeps_original(self):
+        from contextlib import closing
+        from desktop_app.storage import sqlite_copy
+        connect=sqlite3.connect;unlink=Path.unlink;connections=[]
+        class FailedBackup(sqlite3.Connection):
+            def backup(self,*args,**kwargs):raise sqlite3.OperationalError('Simulated backup failure')
+        def tracked(*args,**kwargs):
+            if not connections:kwargs['factory']=FailedBackup
+            connection=connect(*args,**kwargs);connections.append(connection);return connection
+        def checked_unlink(path,*args,**kwargs):
+            for connection in connections:
+                with self.assertRaises(sqlite3.ProgrammingError):connection.execute('SELECT 1')
+            return unlink(path,*args,**kwargs)
+        with tempfile.TemporaryDirectory() as directory:
+            source=Path(directory)/'source.sqlite3';target=Path(directory)/'copy.sqlite3'
+            with closing(connect(source)) as connection:connection.execute('CREATE TABLE clients (name TEXT)')
+            original=source.read_bytes()
+            with patch('desktop_app.storage.sqlite3.connect',side_effect=tracked),patch.object(Path,'unlink',checked_unlink):
+                with self.assertRaisesMessage(sqlite3.OperationalError,'Simulated backup failure'):sqlite_copy(source,target)
+            self.assertEqual(source.read_bytes(),original);self.assertFalse(target.exists())
+            self.assertEqual(list(Path(directory).glob('.copy-*')),[])

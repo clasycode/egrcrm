@@ -1,3 +1,4 @@
+from contextlib import closing
 import datetime
 import hashlib
 import os
@@ -25,7 +26,10 @@ def sqlite_copy(source,target):
     source,target=Path(source),Path(target)
     temporary=target.with_name('.copy-'+uuid.uuid4().hex+'.sqlite3')
     try:
-        with sqlite3.connect(source.resolve().as_uri()+'?mode=ro',uri=True) as src,sqlite3.connect(temporary) as dst:src.backup(dst)
+        # sqlite3's context manager ends a transaction but does not close the file.
+        # Windows requires both handles closed before rename or cleanup.
+        with closing(sqlite3.connect(source.resolve().as_uri()+'?mode=ro',uri=True)) as src,closing(sqlite3.connect(temporary)) as dst:
+            src.backup(dst)
         if target.exists():raise FileExistsError('Копия уже существует; перезапись отменена: '+str(target))
         temporary.chmod(0o600)
         temporary.replace(target)
