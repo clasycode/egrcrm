@@ -11,3 +11,5 @@ whitenoise==6.11.0
 gunicorn==23.0.0; sys_platform != 'win32'
 et_xmlfile==2.0.0
 packaging==26.3
+
+waitress==3.0.2

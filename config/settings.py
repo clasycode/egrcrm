@@ -1,7 +1,8 @@
 import os
 from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
-APP_VERSION = '3.5.1'
+APP_VERSION = '3.6.0'
+LOCAL_MODE = os.environ.get('CRM_LOCAL_MODE') == '1'
 DATA_DIR = Path(os.environ.get('CRM_DATA_DIR',str(BASE_DIR))).resolve()
 BACKUP_DIR = DATA_DIR/'backups'
 DATA_DIR.mkdir(parents=True,exist_ok=True)
@@ -47,3 +48,12 @@ PROGRESS_CACHE_SECONDS = 0 if 'test' in sys.argv else 2
 
 SECURE_HSTS_INCLUDE_SUBDOMAINS = os.environ.get('SECURE_HSTS_INCLUDE_SUBDOMAINS') == '1'
 SECURE_HSTS_PRELOAD = os.environ.get('SECURE_HSTS_PRELOAD') == '1'
+
+# Desktop HTTP is available only on the loopback interface. Public defaults remain HTTPS.
+if LOCAL_MODE:
+    ALLOWED_HOSTS = ['127.0.0.1','localhost','[::1]']
+    SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = SECURE_SSL_REDIRECT = False
+    SECURE_HSTS_SECONDS = 0
+    SESSION_COOKIE_NAME = 'egrcrm_local_sessionid'
+    CSRF_COOKIE_NAME = 'egrcrm_local_csrftoken'
+    SECURE_PROXY_SSL_HEADER = None

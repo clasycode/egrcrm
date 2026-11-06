@@ -15,6 +15,8 @@ class Client:
         self.last_request = 0
         self.lease = lease
     def ensure_active(self,lock=False):
+        from crm.local_runtime import stop_requested
+        if stop_requested(): raise SourceCancelled('Локальная программа останавливается')
         if self.lease:
             from .leases import assert_current
             assert_current(self.lease,lock=lock)

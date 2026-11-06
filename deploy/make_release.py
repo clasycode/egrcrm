@@ -5,7 +5,7 @@ from pathlib import Path
 import tarfile
 
 ROOT_FILES=('manage.py','requirements.txt')
-ROOT_DIRS=('config','crm','templates','deploy')
+ROOT_DIRS=('config','crm','templates','deploy','desktop_app')
 EXCLUDED={'.git','.venv','__pycache__','data','backups','staticfiles','node_modules'}
 
 

@@ -10,6 +10,8 @@ class Command(BaseCommand):
         self.stdout.write('EGR worker started. Ctrl+C to stop.')
         try:
             while True:
+                from crm.local_runtime import stop_requested
+                if stop_requested(): break
                 worked=False
                 try:
                     close_old_connections()
@@ -24,6 +26,7 @@ class Command(BaseCommand):
                             logging.exception('Daily backup failed')
                             CollectorSettings.objects.filter(pk=1).update(last_error='Ошибка резервной копии. Проверьте диск и журнал сервера.')
                     schedule_due();worked=run_one()
+                    if stop_requested(): break
                     from crm.websites import run_search_once
                     run_search_once()
                 except Exception:
